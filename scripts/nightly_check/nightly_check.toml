@@ -1,0 +1,2 @@
+data_dir = "/opt/forest"
+encrypt_keystore = false

@@ -13,8 +13,8 @@ services:
         source: forest_data
         target: /opt/forest
       - type: bind
-        source: ./config.toml
-        target: /opt/forest/config.toml
+        source: ./nightly_check.toml
+        target: /opt/forest/nightly_check.toml
       # Uncomment on the first-run to bootstrap the db.
       # - type: bind
       #   source: /home/ubuntu/snapshots/minimal_finality_stateroots_1973761_2022-07-11_06-00-30.car
@@ -26,6 +26,6 @@ services:
       - '--chain'
       - 'mainnet'
       - '--config'
-      - '/opt/forest/config.toml'
+      - '/opt/forest/nightly_check.toml'
     network_mode: host
     restart: unless-stopped
