@@ -18,7 +18,7 @@ services:
       # Uncomment on the first-run to bootstrap the db.
       # - type: bind
       #   source: /home/ubuntu/snapshots/minimal_finality_stateroots_1973761_2022-07-11_06-00-30.car
-      #   target: /opt/snapshots/calibnet.car
+      #   target: /opt/snapshots/mainnet.car
     command:
       # Uncomment on the first-run to boostrap the db.
       # - '--import-snapshot'
