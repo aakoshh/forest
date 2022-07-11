@@ -1,0 +1,31 @@
+# Docker compose file to run Forest Mainnet instance
+
+version: "3.8"
+
+volumes:
+  forest_data: {}
+
+services:
+  forest_mainnet:
+    image: ghcr.io/chainsafe/forest:latest
+    volumes:
+      - type: volume
+        source: forest_data
+        target: /opt/forest
+      - type: bind
+        source: ./config.toml
+        target: /opt/forest/config.toml
+      # Uncomment on the first-run to bootstrap the db.
+      # - type: bind
+      #   source: /home/ubuntu/snapshots/minimal_finality_stateroots_1973761_2022-07-11_06-00-30.car
+      #   target: /opt/snapshots/calibnet.car
+    command:
+      # Uncomment on the first-run to boostrap the db.
+      # - '--import-snapshot'
+      # - '/opt/snapshots/mainnet.car'
+      - '--chain'
+      - 'mainnet'
+      - '--config'
+      - '/opt/forest/config.toml'
+    network_mode: host
+    restart: unless-stopped

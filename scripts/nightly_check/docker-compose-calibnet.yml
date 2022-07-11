@@ -1,0 +1,31 @@
+# Docker compose file to run Forest Calibnet instance
+
+version: "3.8"
+
+volumes:
+  forest_data: {}
+
+services:
+  forest_calibnet:
+    image: ghcr.io/chainsafe/forest:latest
+    volumes:
+      - type: volume
+        source: forest_data
+        target: /opt/forest
+      - type: bind
+        source: ./config.toml
+        target: /opt/forest/config.toml
+      # Uncomment on the first-run to bootstrap the db.
+      # - type: bind
+      #   source: /home/ubuntu/snapshots/calibnet-2022-07-01.car
+      #   target: /opt/snapshots/calibnet.car
+    command:
+      # Uncomment on the first-run to boostrap the db.
+      # - '--import-snapshot'
+      # - '/opt/snapshots/calibnet.car'
+      - '--chain'
+      - 'calibnet'
+      - '--config'
+      - '/opt/forest/config.toml'
+    network_mode: host
+    restart: unless-stopped
