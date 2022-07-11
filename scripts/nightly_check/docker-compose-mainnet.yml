@@ -1,6 +1,6 @@
 # Docker compose file to run Forest Mainnet instance
 
-version: "3.8"
+version: "3.7"
 
 volumes:
   forest_data: {}
