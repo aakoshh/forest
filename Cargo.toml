@@ -83,10 +83,12 @@ forest_interpreter     = { path = "./vm/interpreter" }
 forest_actor_interface = { path = "./vm/actor_interface" }
 forest_state_migration = { path = "./vm/state_migration" }
 
-# Narwhal depends on blst ^0.3.10, while the following Filecoin libraries on =0.3.7, =0.3.9 dpeneding on which version we pick.
-# Furthermore, fvm and filecoin-proof-api depend on different versions of blstrs, so it's not easy to patch either.
-# blstrs         = { path = "../blstrs" }
-# bls-signatures = { path = "../bls-signatures" }
+# Narwhal depends on blst ^0.3.10, while the following Filecoin libraries on =0.3.7, =0.3.9 depeneding on which version we pick.
+# The later versions of fvm and filecoin-proofs-api depend on different minor versions of bstrs, so it's not possible to upgrade
+# these dependencies and use patching to make them use an updated branch of their common dependency. The only working combination
+# so far is to fork the earliest version of blstrs that both fvm and filecoin-proofs-api use currently, to allow using blst:0.3.10,
+# and then use patch to force using this updated branch.
+# See https://github.com/filecoin-project/blstrs/issues/46
 blstrs         = { git = "https://github.com/aakoshh/blstrs.git", branch = "v0.4.3" }
 bls-signatures = { git = "https://github.com/aakoshh/bls-signatures.git", branch = "v0.11.4" }
 
