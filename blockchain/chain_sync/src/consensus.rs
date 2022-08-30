@@ -183,15 +183,22 @@ impl SyncGossipSubmitter {
         }
     }
 
+    /// Enqueue the block to be appended to the local chain and also gossip it to peers.
     pub async fn submit_block(&self, block: GossipBlock) -> anyhow::Result<()> {
         let data = block.marshal_cbor()?;
-        let ts = Arc::new(Tipset::new(vec![block.header])?);
         let msg = NetworkMessage::PubsubMessage {
             topic: Topic::new(format!("{}/{}", PUBSUB_BLOCK_STR, self.network_name)),
             message: data,
         };
-        self.tipset_tx.send(ts).await?;
+        self.submit_block_locally(block).await?;
         self.network_tx.send(msg).await?;
+        Ok(())
+    }
+
+    /// Enqueue the block to be appended to the local chain, without gossiping to peers.
+    pub async fn submit_block_locally(&self, block: GossipBlock) -> anyhow::Result<()> {
+        let ts = Arc::new(Tipset::new(vec![block.header])?);
+        self.tipset_tx.send(ts).await?;
         Ok(())
     }
 }
