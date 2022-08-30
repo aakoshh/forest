@@ -1,21 +1,33 @@
 // Copyright 2019-2022 ChainSafe Systems
 // SPDX-License-Identifier: Apache-2.0, MIT
+use anyhow::anyhow;
 use arc_swap::ArcSwap;
+use async_std::channel::Receiver;
 use async_std::path::PathBuf;
 use async_std::task;
 use async_std::{channel, task::JoinHandle};
 use async_trait::async_trait;
+use log::{error, warn};
+use narwhal_types::SequenceNumber;
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use forest_blocks::{BlockHeader, GossipBlock, Tipset};
+use forest_chain::{HeadChange, Scale};
 use forest_chain_sync::consensus::{MessagePoolApi, Proposer, SyncGossipSubmitter};
 use forest_ipld_blockstore::BlockStore;
+use forest_message::SignedMessage;
+use forest_networks::Height;
 use forest_state_manager::StateManager;
+use fvm_ipld_encoding::Cbor;
+use fvm_shared::address::Address;
 
 use narwhal_config::{Committee, Parameters};
-use narwhal_fastcrypto::{traits::KeyPair as _, KeyPair};
+use narwhal_fastcrypto::{traits::KeyPair as _, KeyPair, PublicKey};
 use narwhal_node::{Node, NodeStorage};
 
-use crate::exec::NarwhalExecutionState;
+use crate::consensus::{NarwhalConsensus, NarwhalConsensusError};
+use crate::exec::{certificate_index_to_ticket, NarwhalExecutionState, NarwhalOutput};
 
 /// `NarwhalProposer` regularly pulls transactions from the mempool, sorted by their
 /// account nonces, and sends them to Narwhal for Atomic Broadcast. The built-in mempool
@@ -39,30 +51,30 @@ use crate::exec::NarwhalExecutionState;
 pub struct NarwhalProposer {
     keypair: KeyPair,
     committee: Committee,
+    validator_addresses: HashMap<PublicKey, Address>,
     storage_base_path: PathBuf,
     parameters: Parameters,
 }
 
 #[async_trait]
 impl Proposer for NarwhalProposer {
-    /// Start a Narwhal Primary and a Worker in the background.
+    /// Start a Narwhal Primary and a Worker in the background and subscribe to
+    /// local chain extensions. Whenever there is a new tip: (1) check for new
+    /// transactions that can be sent to Narwhal and (2) take the next output
+    /// from Narwhal and turn it into the next block.
     async fn spawn<DB, MP>(
         self,
         state_manager: Arc<StateManager<DB>>,
         _mpool: Arc<MP>,
-        _submitter: SyncGossipSubmitter,
+        submitter: SyncGossipSubmitter,
     ) -> anyhow::Result<Vec<JoinHandle<()>>>
     where
         DB: BlockStore + Sync + Send + 'static,
         MP: MessagePoolApi + Send + Sync + 'static,
     {
-        // The proposer will need to be able to subscribe to:
-        // * The certificates from Narwhal
-        // * The chain extensions in the local chain
-        // When a new certificate arrives from Narwhal, its content can be added to a
-        // pending queue of transactions to be put in the next block.
-        // When a block is appended to the local chain, we can check if there are more
-        // available in the pending queue and add them next.
+        let chain_store = state_manager.chain_store();
+        let (output_tx, output_rx) = channel::bounded(self.committee.size());
+        let execution_state = Arc::new(NarwhalExecutionState::new(chain_store.clone(), output_tx));
 
         // The following is based on the `NodeRestarter` in the narwhal repo.
 
@@ -72,14 +84,9 @@ impl Proposer for NarwhalProposer {
         let store = NodeStorage::reopen(store_path);
 
         let registry = prometheus::Registry::default();
-
-        let (output_tx, _output_rx) = channel::bounded(self.committee.size());
-        let execution_state = Arc::new(NarwhalExecutionState::new(
-            state_manager.chain_store().clone(),
-            output_tx,
-        ));
-
         let name = self.keypair.public().clone();
+
+        // Start the Primary and a Worker. They will ask the execution state where to resume from.
         let mut handles = Vec::new();
 
         let primary_handles = Node::spawn_primary(
@@ -105,11 +112,28 @@ impl Proposer for NarwhalProposer {
         handles.extend(tokio_to_async_std(primary_handles));
         handles.extend(tokio_to_async_std(worker_handles));
 
-        // TODO: Now we have a primary and a worker running. They will ask the execution state where to resume from.
-        // Meanwhile we have to subscribe to get the transactions we can currently propose from the mempool and
-        // send them to the worker. We must remember which account/highest-nonce pairs we sent last. Then, when
-        // a new block is appended to the local chain, we can ask the mempool again, passing in the hightst account
-        // nonce pairs as a filter. If it returns new transactions we can publish those as well.
+        // Subscribe to local chain extensions.
+        let head_change_rx = chain_store.publisher().subscribe();
+
+        // Get the current head of the chain.
+        let current_head = chain_store.heaviest_tipset().await;
+
+        // NOTE: Instead of passig in the current head, we could use `chain_store.sub_header_changes` and `chain_store.next_header_change`,
+        // which has extra machinery to replay the current head, but it involves extra bookkeeping, channels and tasks.
+        handles.push(task::spawn(async {
+            if let Err(e) = handle_head_changes(
+                state_manager,
+                submitter,
+                self.validator_addresses,
+                current_head,
+                head_change_rx,
+                output_rx,
+            )
+            .await
+            {
+                error!("Error handling head changes: {}", e)
+            }
+        }));
 
         Ok(handles)
     }
@@ -122,4 +146,134 @@ fn tokio_to_async_std(
         .into_iter()
         .map(|h| task::spawn(async { h.await.expect("The tokio task has panicked.") }))
         .collect()
+}
+
+async fn handle_head_changes<DB>(
+    state_manager: Arc<StateManager<DB>>,
+    submitter: SyncGossipSubmitter,
+    validator_addresses: HashMap<PublicKey, Address>,
+    mut current_head: Option<Arc<Tipset>>,
+    mut head_change_rx: tokio::sync::broadcast::Receiver<HeadChange>,
+    output_rx: Receiver<NarwhalOutput>,
+) -> anyhow::Result<()>
+where
+    DB: BlockStore + Sync + Send + 'static,
+{
+    loop {
+        // Wait for the next chain extension.
+        let next_head = if let Some(tipset) = current_head.take() {
+            tipset
+        } else {
+            match head_change_rx.recv().await {
+                Err(_) => {
+                    return Err(anyhow!("Cannot receive head changes!"));
+                }
+                Ok(HeadChange::Current(_)) => panic!("Did not expect to receive the current head."),
+                Ok(HeadChange::Revert(_)) => {
+                    panic!("This consensus is supposed to be forward only!")
+                }
+                Ok(HeadChange::Apply(tipset)) => tipset,
+            }
+        };
+
+        // TODO: On local chain extension: query the next viable set of transactions, using previous account/nonce to resume from.
+
+        // Take the next certificate from the queue and turn it into a block, then submit.
+        let next_output = match output_rx.recv().await {
+            Err(_) => return Err(anyhow!("Cannot receive Narwhal output!")),
+            Ok(output) => output,
+        };
+
+        let block = create_block_from_output(
+            &state_manager,
+            &validator_addresses,
+            &next_head,
+            next_output,
+        )
+        .await?;
+
+        submitter.submit_block_locally(block).await?;
+    }
+}
+
+/// Create a block from a Narwhal certificate and the included batches of transactions.
+async fn create_block_from_output<DB>(
+    state_manager: &Arc<StateManager<DB>>,
+    validator_addresses: &HashMap<PublicKey, Address>,
+    base: &Arc<Tipset>,
+    output: NarwhalOutput,
+) -> anyhow::Result<GossipBlock>
+where
+    DB: BlockStore + Sync + Send + 'static,
+{
+    let validator_key = output.consensus_output.certificate.origin();
+    let miner_addr = validator_addresses
+        .get(&validator_key)
+        .map(|a| a.clone())
+        .ok_or_else(|| NarwhalConsensusError::NoMinerAddress(validator_key))?;
+    let consensus_index = output.consensus_output.consensus_index;
+
+    let mut messages = Vec::new();
+    for batch in output.transaction_batches {
+        for bytes in batch {
+            match SignedMessage::unmarshal_cbor(bytes.as_ref()) {
+                Ok(msg) => messages.push(msg),
+                Err(e) => {
+                    warn!("Error unmarshaling message: {}", e);
+                    continue;
+                }
+            };
+        }
+    }
+
+    create_block(state_manager, base, miner_addr, consensus_index, messages).await
+}
+
+/// Create a block from a Narwhal certificate and the included batches of transactions.
+async fn create_block<DB>(
+    state_manager: &Arc<StateManager<DB>>,
+    base: &Arc<Tipset>,
+    miner_addr: Address,
+    consensus_index: SequenceNumber,
+    messages: Vec<SignedMessage>,
+) -> anyhow::Result<GossipBlock>
+where
+    DB: BlockStore + Sync + Send + 'static,
+{
+    let smoke_height = state_manager.chain_config().epoch(Height::Smoke);
+    let (parent_state_root, parent_receipts) = state_manager.tipset_state(base).await?;
+    let parent_base_fee =
+        forest_chain::compute_base_fee(state_manager.blockstore(), base, smoke_height)?;
+
+    let parent_weight = NarwhalConsensus::weight(state_manager.blockstore(), base)?;
+    let persisted = forest_chain::persist_block_messages(
+        state_manager.blockstore(),
+        messages.iter().collect(),
+    )?;
+
+    // Use the ticket to persist the consensus index, for crash recovery.
+    let ticket = certificate_index_to_ticket(consensus_index);
+
+    // There is nothing in the certificate to suggest what time it was made, so we can't assign a timestamp.
+    let mut header = BlockHeader::builder()
+        .messages(persisted.msg_cid)
+        .bls_aggregate(Some(persisted.bls_agg))
+        .miner_address(miner_addr)
+        .ticket(Some(ticket))
+        .weight(parent_weight)
+        .parent_base_fee(parent_base_fee)
+        .parents(base.key().clone())
+        .epoch(base.epoch() + 1)
+        .state_root(parent_state_root)
+        .message_receipts(parent_receipts)
+        .build()?;
+
+    // We cannot sign the header because it has to be derived deterministically and identically on all nodes.
+    header.signature = None;
+
+    Ok(GossipBlock {
+        header,
+        bls_messages: persisted.bls_cids,
+        secpk_messages: persisted.secp_cids,
+    })
 }

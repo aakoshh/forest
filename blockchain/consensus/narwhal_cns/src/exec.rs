@@ -5,9 +5,10 @@ use std::sync::{
 
 use async_std::channel::Sender;
 use async_trait::async_trait;
-use forest_blocks::{Error as BlockchainError, Tipset};
+use forest_blocks::{Error as BlockchainError, Ticket, Tipset};
 use forest_chain::ChainStore;
 use forest_chain::Error as ChainStoreError;
+use forest_crypto::VRFProof;
 use forest_ipld_blockstore::BlockStore;
 use narwhal_consensus::ConsensusOutput;
 use narwhal_executor::{
@@ -106,16 +107,24 @@ fn tipset_certificate_index(tipset: &Tipset) -> Result<SequenceNumber, NarwhalCo
         None => Err(NarwhalConsensusError::ChainStore(
             ChainStoreError::Blockchain(BlockchainError::InvalidTipset("Missing ticket.".into())),
         )),
-        Some(ticket) => {
-            let bytes = ticket.vrfproof.as_bytes();
-            match bytes.try_into() {
-                Ok(bytes) => Ok(u64::from_be_bytes(bytes)),
-                Err(_) => Err(NarwhalConsensusError::ChainStore(
-                    ChainStoreError::Encoding(
-                        "Unexpected bytes for sequence number in ticket.".into(),
-                    ),
-                )),
-            }
-        }
+        Some(ticket) => ticket_to_certificate_index(ticket),
     }
+}
+
+pub fn ticket_to_certificate_index(
+    ticket: &Ticket,
+) -> Result<SequenceNumber, NarwhalConsensusError> {
+    let bytes = ticket.vrfproof.as_bytes();
+    match bytes.try_into() {
+        Ok(bytes) => Ok(u64::from_be_bytes(bytes)),
+        Err(_) => Err(NarwhalConsensusError::ChainStore(
+            ChainStoreError::Encoding("Unexpected bytes for sequence number in ticket.".into()),
+        )),
+    }
+}
+
+pub fn certificate_index_to_ticket(index: SequenceNumber) -> Ticket {
+    let bytes = u64::to_be_bytes(index);
+    let proof = VRFProof(Vec::from(bytes));
+    Ticket::new(proof)
 }

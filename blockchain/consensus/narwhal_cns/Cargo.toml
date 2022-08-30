@@ -5,30 +5,32 @@ authors = ["ChainSafe Systems <info@chainsafe.io>"]
 edition = "2021"
 
 [dependencies]
-anyhow            = "1.0"
-arc-swap          = { version = "1.5.1", features = ["serde"] }
-async-std         = { version = "1.9", features = ["tokio1", "unstable"] }
-async-trait       = "0.1"
-futures           = "0.3.23"
-fvm_ipld_encoding = "0.2"
-log               = "0.4.8"
-nonempty          = "0.8.0"
-prometheus        = "0.13.1"
-thiserror         = "1.0"
-tokio             = { version = "1.0", features = ["sync"] }
+anyhow      = "1.0"
+arc-swap    = { version = "1.5.1", features = ["serde"] }
+async-std   = { version = "1.9", features = ["tokio1", "unstable"] }
+async-trait = "0.1"
+futures     = "0.3.23"
+log         = "0.4.8"
+nonempty    = "0.8.0"
+prometheus  = "0.13.1"
+thiserror   = "1.0"
+tokio       = { version = "1.0", features = ["sync"] }
 
-cid                    = { version = "0.8", default-features = false, features = ["std"] }
-forest_encoding        = { version = "0.2.1" }
-forest_fil_types       = "0.2"
-forest_ipld_blockstore = "0.1"
-fvm_shared             = { version = "0.8.0", default-features = false }
+cid               = { version = "0.8", default-features = false, features = ["std"] }
+fvm_ipld_encoding = "0.2"
+fvm_shared        = { version = "0.8.0", default-features = false }
 
 forest_actor_interface = "0.1.0"
 forest_blocks          = "0.1.0"
 forest_chain           = "0.1.0"
 forest_chain_sync      = "0.1.0"
+forest_crypto          = "0.5"
+forest_encoding        = "0.2.1"
+forest_fil_types       = "0.2"
 forest_interpreter     = "0.1.0"
+forest_ipld_blockstore = "0.1"
 forest_key_management  = "0.1.0"
+forest_message         = "0.7.0"
 forest_networks        = "0.1.0"
 forest_state_manager   = "0.1.0"
 

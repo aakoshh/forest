@@ -1,6 +1,7 @@
 // Copyright 2019-2022 ChainSafe Systems
 // SPDX-License-Identifier: Apache-2.0, MIT
 use async_trait::async_trait;
+use narwhal_fastcrypto::PublicKey;
 use std::fmt::Debug;
 use std::sync::Arc;
 use thiserror::Error;
@@ -25,6 +26,8 @@ pub enum NarwhalConsensusError {
     StateManager(#[from] StateManagerError),
     #[error("Encoding error: {0}")]
     ForestEncoding(#[from] ForestEncodingError),
+    #[error("No miner address for validator key: {0}")]
+    NoMinerAddress(PublicKey),
     #[error("{0}")]
     Other(String),
 }
