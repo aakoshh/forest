@@ -8,9 +8,11 @@ use forest_state_manager::StateManager;
 use fvm_shared::bigint::BigInt;
 use std::sync::Arc;
 
+use crate::consensus::NarwhalConsensus;
+
 type MiningTask = JoinHandle<anyhow::Result<()>>;
 
-pub type FullConsensus = ();
+pub type FullConsensus = NarwhalConsensus;
 
 pub const FETCH_PARAMS: bool = false;
 
@@ -29,7 +31,7 @@ pub async fn consensus<DB, MP>(
     _keystore: &Arc<RwLock<KeyStore>>,
     _mpool: &Arc<MP>,
     _submitter: SyncGossipSubmitter,
-) -> (FullConsensus, Option<MiningTask>)
+) -> anyhow::Result<(FullConsensus, Vec<MiningTask>)>
 where
     DB: BlockStore + Send + Sync + 'static,
     MP: MessagePoolApi + Send + Sync + 'static,

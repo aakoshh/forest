@@ -3256,6 +3256,7 @@ dependencies = [
  "forest_message",
  "forest_message_pool",
  "forest_metrics",
+ "forest_narwhal_cns",
  "forest_net_utils",
  "forest_networks",
  "forest_paramfetch",

@@ -50,6 +50,7 @@ lint: license clean
 	taplo lint
 	cargo clippy --all-targets -- -D warnings
 	cargo clippy --all-targets --features forest_deleg_cns -- -D warnings
+	cargo clippy --all-targets --features forest_narwhal_cns -- -D warnings
 
 # Formats Rust and TOML files
 fmt:
