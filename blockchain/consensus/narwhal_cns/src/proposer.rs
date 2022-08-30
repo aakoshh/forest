@@ -68,11 +68,12 @@ impl Proposer for NarwhalProposer {
         let mut store_path = self.storage_base_path.clone();
         store_path.push(format!("epoch{}", self.committee.epoch()));
         let store = NodeStorage::reopen(store_path);
+
         let registry = prometheus::Registry::default();
+
+        let execution_state = Arc::new(NarwhalState::new(state_manager.chain_store().clone()));
+
         let name = self.keypair.public().clone();
-
-        let execution_state = Arc::new(NarwhalState::new(state_manager.blockstore_cloned()));
-
         let mut handles = Vec::new();
 
         let primary_handles = Node::spawn_primary(
@@ -87,7 +88,7 @@ impl Proposer for NarwhalProposer {
         .await?;
 
         let worker_handles = Node::spawn_workers(
-            name.clone(),
+            name,
             vec![0],
             Arc::new(ArcSwap::new(Arc::new(self.committee))),
             &store,

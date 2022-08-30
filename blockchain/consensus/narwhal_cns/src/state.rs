@@ -1,6 +1,12 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 use async_trait::async_trait;
+use forest_blocks::{Error as BlockchainError, Tipset};
+use forest_chain::ChainStore;
+use forest_chain::Error as ChainStoreError;
 use forest_ipld_blockstore::BlockStore;
 use narwhal_consensus::ConsensusOutput;
 use narwhal_executor::{
@@ -11,14 +17,14 @@ use narwhal_types::SequenceNumber;
 use crate::consensus::NarwhalConsensusError;
 
 pub struct NarwhalState<BS> {
-    store: BS,
+    chain_store: Arc<ChainStore<BS>>,
     locked: AtomicBool,
 }
 
 impl<BS> NarwhalState<BS> {
-    pub fn new(store: BS) -> Self {
+    pub fn new(chain_store: Arc<ChainStore<BS>>) -> Self {
         Self {
-            store,
+            chain_store,
             locked: AtomicBool::new(false),
         }
     }
@@ -50,9 +56,13 @@ impl<BS> BatchExecutionState for NarwhalState<BS>
 where
     BS: BlockStore + Sync + Send + 'static,
 {
+    /// Load the tip of the chain and get the last certificate index from the `Ticket` in the header.
     async fn load_next_certificate_index(&self) -> Result<SequenceNumber, Self::Error> {
         // Load the last certificate from the KV store.
-        todo!()
+        match self.chain_store.heaviest_tipset().await {
+            None => Ok(0),
+            Some(tipset) => tipset_certificate_index(tipset.as_ref()),
+        }
     }
 
     async fn handle_consensus(
@@ -70,5 +80,29 @@ where
         // of the base block to remember what we have written, so we don't need extra storage.
 
         todo!()
+    }
+}
+
+/// Parse the certificate index from the `Ticket` in a `Tipset`.
+///
+/// While storing the index in the `Ticket` is a bit of a hack, this way we can be sure that storing
+/// the block and the certificate is an atomic operation, and we don't need extra key-value store
+/// entries for the sequence number.
+fn tipset_certificate_index(tipset: &Tipset) -> Result<SequenceNumber, NarwhalConsensusError> {
+    match tipset.min_ticket() {
+        None => Err(NarwhalConsensusError::ChainStore(
+            ChainStoreError::Blockchain(BlockchainError::InvalidTipset("Missing ticket.".into())),
+        )),
+        Some(ticket) => {
+            let bytes = ticket.vrfproof.as_bytes();
+            match bytes.try_into() {
+                Ok(bytes) => Ok(u64::from_be_bytes(bytes)),
+                Err(_) => Err(NarwhalConsensusError::ChainStore(
+                    ChainStoreError::Encoding(
+                        "Unexpected bytes for sequence number in ticket.".into(),
+                    ),
+                )),
+            }
+        }
     }
 }
