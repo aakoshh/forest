@@ -3916,9 +3916,14 @@ name = "forest_narwhal_cns"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "async-std",
  "async-trait",
  "cid",
+ "config 0.1.0",
+ "consensus",
+ "executor",
+ "fastcrypto",
  "forest_actor_interface",
  "forest_blocks",
  "forest_chain",
@@ -3936,7 +3941,9 @@ dependencies = [
  "log",
  "node",
  "nonempty",
+ "prometheus 0.13.1",
  "thiserror",
+ "types",
 ]
 
 [[package]]

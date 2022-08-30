@@ -3,6 +3,7 @@
 
 mod consensus;
 mod proposer;
+mod state;
 
 // Shim to work with daemon.rs
 pub mod composition;

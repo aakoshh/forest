@@ -28,11 +28,13 @@ pub enum NarwhalConsensusError {
 }
 
 /// In Narwhal Consensus we don't gossip blocks, we create deterministic
-/// blocks locally and append them only to our own chain.
+/// blocks locally from the certificates we receive from Narwhal, and
+/// append them to our local chain.
+///
+/// The catch is that Narwhal only allows committee members to participate,
+/// so we basically cannot have non-validator nodes in the subnet.
 #[derive(Debug)]
-pub struct NarwhalConsensus {
-    // TODO: Cluster and committee configuration.
-}
+pub struct NarwhalConsensus;
 
 impl Scale for NarwhalConsensus {
     fn weight<DB>(_: &DB, ts: &Tipset) -> anyhow::Result<Weight>
