@@ -74,6 +74,7 @@ impl Proposer for NarwhalProposer {
     {
         let chain_store = state_manager.chain_store();
         let (output_tx, output_rx) = channel::bounded(self.committee.size());
+        let (head_tx, head_rx) = tokio::sync::watch::channel(None);
         let execution_state = Arc::new(NarwhalExecutionState::new(chain_store.clone(), output_tx));
 
         // The following is based on the `NodeRestarter` in the narwhal repo.
@@ -119,7 +120,8 @@ impl Proposer for NarwhalProposer {
         let current_head = chain_store.heaviest_tipset().await;
 
         // NOTE: Instead of passig in the current head, we could use `chain_store.sub_header_changes` and `chain_store.next_header_change`,
-        // which has extra machinery to replay the current head, but it involves extra bookkeeping, channels and tasks.
+        // which has extra machinery to replay the current head, but it involves extra bookkeeping, channels and tasks, and also sets a
+        // lower limit for lagging, although that in our case wouldn't matter since we create blocks at the pace we can consume them.
         handles.push(task::spawn(async {
             if let Err(e) = handle_head_changes(
                 state_manager,
@@ -127,11 +129,18 @@ impl Proposer for NarwhalProposer {
                 self.validator_addresses,
                 current_head,
                 head_change_rx,
+                head_tx,
                 output_rx,
             )
             .await
             {
                 error!("Error handling head changes: {}", e)
+            }
+        }));
+
+        handles.push(task::spawn(async {
+            if let Err(e) = handle_head_watch(head_rx).await {
+                error!("Error handling head watch: {}", e)
             }
         }));
 
@@ -148,12 +157,15 @@ fn tokio_to_async_std(
         .collect()
 }
 
+/// Handle local chain extensions by projecting blocks on top of them from the Narwhal batches.
+/// Also ping the mempool querier that there might be some change that makes it worth running another check.
 async fn handle_head_changes<DB>(
     state_manager: Arc<StateManager<DB>>,
     submitter: SyncGossipSubmitter,
     validator_addresses: HashMap<PublicKey, Address>,
     mut current_head: Option<Arc<Tipset>>,
     mut head_change_rx: tokio::sync::broadcast::Receiver<HeadChange>,
+    head_tx: tokio::sync::watch::Sender<Option<Arc<Tipset>>>,
     output_rx: Receiver<NarwhalOutput>,
 ) -> anyhow::Result<()>
 where
@@ -176,7 +188,8 @@ where
             }
         };
 
-        // TODO: On local chain extension: query the next viable set of transactions, using previous account/nonce to resume from.
+        // Query the next viable set of transactions, using previous account/nonce to resume from.
+        head_tx.send_replace(Some(next_head.clone()));
 
         // Take the next certificate from the queue and turn it into a block, then submit.
         let next_output = match output_rx.recv().await {
@@ -184,6 +197,9 @@ where
             Ok(output) => output,
         };
 
+        // TODO: We might have to create multiple blocks from the same batch to respect limits!
+        // For that, we should bite off just enough messages to be within limits, then keep the
+        // partially consumed output in a buffer until we manage to append the block.
         let block = create_block_from_output(
             &state_manager,
             &validator_addresses,
@@ -192,6 +208,7 @@ where
         )
         .await?;
 
+        // Enqueue appending to the local blockchain.
         submitter.submit_block_locally(block).await?;
     }
 }
@@ -252,6 +269,8 @@ where
     )?;
 
     // Use the ticket to persist the consensus index, for crash recovery.
+    // TODO: If we make a partial block then we have to keep track of the
+    // index of the last transaction we managed to include as well.
     let ticket = certificate_index_to_ticket(consensus_index);
 
     // There is nothing in the certificate to suggest what time it was made, so we can't assign a timestamp.
@@ -276,4 +295,19 @@ where
         bls_messages: persisted.bls_cids,
         secpk_messages: persisted.secp_cids,
     })
+}
+
+/// Upon the extension of the local chain, check the mempool for messages that could be executed according
+/// to their account ID and nonce. Using a `watch` channel because it's okay to skip this step if it's
+/// already running, we don't have to react to every block.
+async fn handle_head_watch(
+    mut head_rx: tokio::sync::watch::Receiver<Option<Arc<Tipset>>>,
+) -> anyhow::Result<()> {
+    loop {
+        head_rx.changed().await?;
+
+        if let Some(current_head) = head_rx.borrow_and_update().clone() {
+            todo!()
+        }
+    }
 }

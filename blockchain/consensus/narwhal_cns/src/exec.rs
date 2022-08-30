@@ -70,7 +70,13 @@ where
         // Load the last certificate from the KV store.
         match self.chain_store.heaviest_tipset().await {
             None => Ok(0),
-            Some(tipset) => tipset_certificate_index(tipset.as_ref()),
+            Some(tipset) => {
+                let last_certificate_index = tipset_certificate_index(tipset.as_ref())?;
+                // Return one higher, because this one we don't have to replay.
+                // TODO: If we have to fill partial blocks, we would potentially have to replay it,
+                // if we did not manage to put all transactions into a block.
+                Ok(last_certificate_index + 1)
+            }
         }
     }
 
