@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0, MIT
 
 mod consensus;
+mod exec;
 mod proposer;
-mod state;
 
 // Shim to work with daemon.rs
 pub mod composition;

@@ -13,7 +13,7 @@ use narwhal_config::{Committee, Parameters};
 use narwhal_fastcrypto::{traits::KeyPair as _, KeyPair};
 use narwhal_node::{Node, NodeStorage};
 
-use crate::state::NarwhalState;
+use crate::exec::NarwhalExecutionState;
 
 /// `NarwhalProposer` regularly pulls transactions from the mempool, sorted by their
 /// account nonces, and sends them to Narwhal for Atomic Broadcast. The built-in mempool
@@ -71,7 +71,9 @@ impl Proposer for NarwhalProposer {
 
         let registry = prometheus::Registry::default();
 
-        let execution_state = Arc::new(NarwhalState::new(state_manager.chain_store().clone()));
+        let execution_state = Arc::new(NarwhalExecutionState::new(
+            state_manager.chain_store().clone(),
+        ));
 
         let name = self.keypair.public().clone();
         let mut handles = Vec::new();

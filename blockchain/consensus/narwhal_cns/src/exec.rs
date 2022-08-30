@@ -16,12 +16,12 @@ use narwhal_types::SequenceNumber;
 
 use crate::consensus::NarwhalConsensusError;
 
-pub struct NarwhalState<BS> {
+pub struct NarwhalExecutionState<BS> {
     chain_store: Arc<ChainStore<BS>>,
     locked: AtomicBool,
 }
 
-impl<BS> NarwhalState<BS> {
+impl<BS> NarwhalExecutionState<BS> {
     pub fn new(chain_store: Arc<ChainStore<BS>>) -> Self {
         Self {
             chain_store,
@@ -37,7 +37,7 @@ impl ExecutionStateError for NarwhalConsensusError {
     }
 }
 
-impl<BS> ExecutionState for NarwhalState<BS> {
+impl<BS> ExecutionState for NarwhalExecutionState<BS> {
     type Error = NarwhalConsensusError;
 
     fn ask_consensus_write_lock(&self) -> bool {
@@ -52,7 +52,7 @@ impl<BS> ExecutionState for NarwhalState<BS> {
 }
 
 #[async_trait]
-impl<BS> BatchExecutionState for NarwhalState<BS>
+impl<BS> BatchExecutionState for NarwhalExecutionState<BS>
 where
     BS: BlockStore + Sync + Send + 'static,
 {
