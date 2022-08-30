@@ -272,8 +272,9 @@ pub(super) async fn start(config: Config) {
     );
 
     // Initialize Consensus. Mining may or may not happen, depending on type.
-    let (consensus, mining_task) =
-        cns::consensus(&state_manager, &keystore, &mpool, submitter).await;
+    let (consensus, mining_tasks) = cns::consensus(&state_manager, &keystore, &mpool, submitter)
+        .await
+        .unwrap();
 
     // Initialize ChainMuxer
     let chain_muxer_tipset_sink = tipset_sink.clone();
@@ -336,7 +337,9 @@ pub(super) async fn start(config: Config) {
     });
 
     // Cancel all async services
-    maybe_cancel(mining_task).await;
+    for mining_task in mining_tasks {
+        mining_task.cancel().await;
+    }
     prometheus_server_task.cancel().await;
     sync_task.cancel().await;
     p2p_task.cancel().await;
