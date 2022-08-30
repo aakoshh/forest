@@ -2,6 +2,7 @@ use arc_swap::ArcSwap;
 use async_std::path::PathBuf;
 // Copyright 2019-2022 ChainSafe Systems
 // SPDX-License-Identifier: Apache-2.0, MIT
+use async_std::channel;
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -71,8 +72,10 @@ impl Proposer for NarwhalProposer {
 
         let registry = prometheus::Registry::default();
 
+        let (output_tx, output_rx) = channel::bounded(self.committee.size());
         let execution_state = Arc::new(NarwhalExecutionState::new(
             state_manager.chain_store().clone(),
+            output_tx,
         ));
 
         let name = self.keypair.public().clone();

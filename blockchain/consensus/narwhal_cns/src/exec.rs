@@ -3,6 +3,7 @@ use std::sync::{
     Arc,
 };
 
+use async_std::channel::Sender;
 use async_trait::async_trait;
 use forest_blocks::{Error as BlockchainError, Tipset};
 use forest_chain::ChainStore;
@@ -16,15 +17,22 @@ use narwhal_types::SequenceNumber;
 
 use crate::consensus::NarwhalConsensusError;
 
+pub struct NarwhalOutput {
+    pub consensus_output: ConsensusOutput,
+    pub transaction_batches: Vec<Vec<SerializedTransaction>>,
+}
+
 pub struct NarwhalExecutionState<BS> {
     chain_store: Arc<ChainStore<BS>>,
+    output_tx: Sender<NarwhalOutput>,
     locked: AtomicBool,
 }
 
 impl<BS> NarwhalExecutionState<BS> {
-    pub fn new(chain_store: Arc<ChainStore<BS>>) -> Self {
+    pub fn new(chain_store: Arc<ChainStore<BS>>, output_tx: Sender<NarwhalOutput>) -> Self {
         Self {
             chain_store,
+            output_tx,
             locked: AtomicBool::new(false),
         }
     }
@@ -71,15 +79,20 @@ where
         transaction_batches: Vec<Vec<SerializedTransaction>>,
     ) -> Result<(), Self::Error> {
         // Append the transactions and the certificate to a pending queue that we can take values from
-        // when we have extended the local blockchain with a block. Or maybe we can try to keep the
-        // last block in memory and build directly on top of it.
+        // when we have extended the local blockchain with a block. It is tempting to try to keep the
+        // last block we built here and just keep appending on top of it, or to append it directly to
+        // the chainstore. But that would bypass all the regular channels in `TipsetProcessor` and
+        // `ChainMuxer`, which are quite difficult to grasp, making this a risky option.
 
-        // TODO: Add a channel sender to this struct to send the output to, which we can receive
-        // from any time after we have extended the local chain. When it's been appended to, we
-        // should atomically also save the next certificate index. Maybe we can use the ticket
-        // of the base block to remember what we have written, so we don't need extra storage.
-
-        todo!()
+        let output = NarwhalOutput {
+            consensus_output: consensus_output.clone(),
+            transaction_batches,
+        };
+        self.output_tx
+            .send(output)
+            .await
+            .map_err(|_| NarwhalConsensusError::Other("Cannot send output.".into()))?;
+        Ok(())
     }
 }
 

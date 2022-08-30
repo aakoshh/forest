@@ -25,6 +25,8 @@ pub enum NarwhalConsensusError {
     StateManager(#[from] StateManagerError),
     #[error("Encoding error: {0}")]
     ForestEncoding(#[from] ForestEncodingError),
+    #[error("{0}")]
+    Other(String),
 }
 
 /// In Narwhal Consensus we don't gossip blocks, we create deterministic
