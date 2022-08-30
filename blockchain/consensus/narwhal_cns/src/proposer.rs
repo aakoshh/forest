@@ -12,7 +12,7 @@ use narwhal_types::SequenceNumber;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use forest_blocks::{BlockHeader, GossipBlock, Tipset};
+use forest_blocks::{BlockHeader, GossipBlock, Ticket, Tipset};
 use forest_chain::{HeadChange, Scale};
 use forest_chain_sync::consensus::{MessagePoolApi, Proposer, SyncGossipSubmitter};
 use forest_ipld_blockstore::BlockStore;
@@ -27,7 +27,7 @@ use narwhal_fastcrypto::{traits::KeyPair as _, KeyPair, PublicKey};
 use narwhal_node::{Node, NodeStorage};
 
 use crate::consensus::{NarwhalConsensus, NarwhalConsensusError};
-use crate::exec::{certificate_index_to_ticket, NarwhalExecutionState, NarwhalOutput};
+use crate::exec::{ConsensusTransactionIndex, NarwhalExecutionState, NarwhalOutput};
 
 /// `NarwhalProposer` regularly pulls transactions from the mempool, sorted by their
 /// account nonces, and sends them to Narwhal for Atomic Broadcast. The built-in mempool
@@ -268,10 +268,16 @@ where
         messages.iter().collect(),
     )?;
 
-    // Use the ticket to persist the consensus index, for crash recovery.
     // TODO: If we make a partial block then we have to keep track of the
     // index of the last transaction we managed to include as well.
-    let ticket = certificate_index_to_ticket(consensus_index);
+    let index = ConsensusTransactionIndex {
+        consensus_index,
+        transactions_included: messages.len() as u32,
+        transactions_total: messages.len() as u32,
+    };
+
+    // Use the ticket to persist the consensus index, for crash recovery.
+    let ticket: Ticket = index.try_into()?;
 
     // There is nothing in the certificate to suggest what time it was made, so we can't assign a timestamp.
     let mut header = BlockHeader::builder()
