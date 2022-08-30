@@ -3943,6 +3943,7 @@ dependencies = [
  "nonempty",
  "prometheus 0.13.1",
  "thiserror",
+ "tokio",
  "types",
 ]
 

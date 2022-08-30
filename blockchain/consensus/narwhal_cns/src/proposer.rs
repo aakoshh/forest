@@ -1,8 +1,9 @@
-use arc_swap::ArcSwap;
-use async_std::path::PathBuf;
 // Copyright 2019-2022 ChainSafe Systems
 // SPDX-License-Identifier: Apache-2.0, MIT
-use async_std::channel;
+use arc_swap::ArcSwap;
+use async_std::path::PathBuf;
+use async_std::task;
+use async_std::{channel, task::JoinHandle};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -45,12 +46,12 @@ pub struct NarwhalProposer {
 #[async_trait]
 impl Proposer for NarwhalProposer {
     /// Start a Narwhal Primary and a Worker in the background.
-    async fn run<DB, MP>(
+    async fn spawn<DB, MP>(
         self,
         state_manager: Arc<StateManager<DB>>,
-        _mpool: &MP,
-        _submitter: &SyncGossipSubmitter,
-    ) -> anyhow::Result<()>
+        _mpool: Arc<MP>,
+        _submitter: SyncGossipSubmitter,
+    ) -> anyhow::Result<Vec<JoinHandle<()>>>
     where
         DB: BlockStore + Sync + Send + 'static,
         MP: MessagePoolApi + Send + Sync + 'static,
@@ -72,7 +73,7 @@ impl Proposer for NarwhalProposer {
 
         let registry = prometheus::Registry::default();
 
-        let (output_tx, output_rx) = channel::bounded(self.committee.size());
+        let (output_tx, _output_rx) = channel::bounded(self.committee.size());
         let execution_state = Arc::new(NarwhalExecutionState::new(
             state_manager.chain_store().clone(),
             output_tx,
@@ -101,10 +102,8 @@ impl Proposer for NarwhalProposer {
             &registry,
         );
 
-        handles.extend(primary_handles);
-        handles.extend(worker_handles);
-
-        // TODO: Register to system shutdown and stop the handles.
+        handles.extend(tokio_to_async_std(primary_handles));
+        handles.extend(tokio_to_async_std(worker_handles));
 
         // TODO: Now we have a primary and a worker running. They will ask the execution state where to resume from.
         // Meanwhile we have to subscribe to get the transactions we can currently propose from the mempool and
@@ -112,6 +111,15 @@ impl Proposer for NarwhalProposer {
         // a new block is appended to the local chain, we can ask the mempool again, passing in the hightst account
         // nonce pairs as a filter. If it returns new transactions we can publish those as well.
 
-        todo!()
+        Ok(handles)
     }
+}
+
+fn tokio_to_async_std(
+    handles: Vec<tokio::task::JoinHandle<()>>,
+) -> Vec<async_std::task::JoinHandle<()>> {
+    handles
+        .into_iter()
+        .map(|h| task::spawn(async { h.await.expect("The tokio task has panicked.") }))
+        .collect()
 }
