@@ -124,7 +124,7 @@ impl Proposer for NarwhalProposer {
         // Get the current head of the chain.
         let current_head = chain_store.heaviest_tipset().await;
 
-        // NOTE: Instead of passig in the current head, we could use `chain_store.sub_header_changes` and `chain_store.next_header_change`,
+        // NOTE: Instead of passing in the current head, we could use `chain_store.sub_header_changes` and `chain_store.next_header_change`,
         // which has extra machinery to replay the current head, but it involves extra bookkeeping, channels and tasks, and also sets a
         // lower limit for lagging, although that in our case wouldn't matter since we create blocks at the pace we can consume them.
         let state_manager_clone = state_manager.clone();
