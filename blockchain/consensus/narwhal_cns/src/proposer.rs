@@ -65,7 +65,7 @@ impl Proposer for NarwhalProposer {
     async fn spawn<DB, MP>(
         self,
         state_manager: Arc<StateManager<DB>>,
-        _mpool: Arc<MP>,
+        mpool: Arc<MP>,
         submitter: SyncGossipSubmitter,
     ) -> anyhow::Result<Vec<JoinHandle<()>>>
     where
@@ -122,9 +122,10 @@ impl Proposer for NarwhalProposer {
         // NOTE: Instead of passig in the current head, we could use `chain_store.sub_header_changes` and `chain_store.next_header_change`,
         // which has extra machinery to replay the current head, but it involves extra bookkeeping, channels and tasks, and also sets a
         // lower limit for lagging, although that in our case wouldn't matter since we create blocks at the pace we can consume them.
-        handles.push(task::spawn(async {
+        let state_manager_clone = state_manager.clone();
+        handles.push(task::spawn(async move {
             if let Err(e) = handle_head_changes(
-                state_manager,
+                state_manager_clone,
                 submitter,
                 self.validator_addresses,
                 current_head,
@@ -138,8 +139,8 @@ impl Proposer for NarwhalProposer {
             }
         }));
 
-        handles.push(task::spawn(async {
-            if let Err(e) = handle_head_watch(head_rx).await {
+        handles.push(task::spawn(async move {
+            if let Err(e) = handle_head_watch(state_manager, mpool, head_rx).await {
                 error!("Error handling head watch: {}", e)
             }
         }));
@@ -306,13 +307,64 @@ where
 /// Upon the extension of the local chain, check the mempool for messages that could be executed according
 /// to their account ID and nonce. Using a `watch` channel because it's okay to skip this step if it's
 /// already running, we don't have to react to every block.
-async fn handle_head_watch(
+async fn handle_head_watch<DB, MP>(
+    state_manager: Arc<StateManager<DB>>,
+    mpool: Arc<MP>,
     mut head_rx: tokio::sync::watch::Receiver<Option<Arc<Tipset>>>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<()>
+where
+    DB: BlockStore + Sync + Send + 'static,
+    MP: MessagePoolApi + Send + Sync + 'static,
+{
+    // Keep track of the last nonce for each account for which we sent a message to Narwhal.
+    let mut submitted_account_sequences = HashMap::new();
     loop {
+        // Wait for a block to be appended to the local chain.
+        // Narwhal will produce blocks regularly, so as long as we append non-empty
+        // blocks this event will fire. We might opt not to add empty blocks, but
+        // it's not clear for how long; if we don't add blocks unless there are
+        // messages inside, then we'd need another timer here. But that would lead
+        // to a very dead looking blockchain if there are no transactions at all.
         head_rx.changed().await?;
 
-        if let Some(current_head) = head_rx.borrow_and_update().clone() {
+        // Hold the borrow for as little time as possible to avoid blocking the writes.
+        let maybe_head = {
+            let r = head_rx.borrow_and_update();
+            r.clone()
+        };
+
+        if let Some(current_head) = maybe_head {
+            // Select any message that can now be included on the chain. These might be
+            // because the account has a positive balance where it didn't previously,
+            // or because there are new messages that we didn't have last time.
+            // What it will not do is try to project a `base` block into the future
+            // and guess what the account balance might be as if we have already
+            // executed the messages we sent to Narwhal. Instead we'll just skip
+            // those messages so they aren't double sent.
+            // A side effect of this skipping is that if the user replacs their message
+            // in the mempool with a different one having the same nonce, we will just
+            // skip if it's already been sent to Narwhal.
+            // At some point we also have to make sure that if Narwhal didn't include
+            // a batch that contains these messages, we try to send them again.
+            // TODO: Check how Narwhal behaves with regards to ignoring batches,
+            // and that it preserves insertion order.
+            let msgs = mpool
+                .select_signed(
+                    state_manager.as_ref(),
+                    current_head.as_ref(),
+                    &submitted_account_sequences,
+                )
+                .await?;
+
+            if msgs.is_empty() {
+                continue;
+            }
+
+            for msg in msgs {
+                submitted_account_sequences.insert(msg.message.from, msg.message.sequence);
+            }
+
+            // Send the transactions to the worker.
             todo!()
         }
     }
