@@ -9,8 +9,10 @@ use forest_message::SignedMessage;
 use forest_message_pool::MessagePool;
 use futures::stream::FuturesUnordered;
 use fvm_ipld_encoding::Cbor;
+use fvm_shared::address::Address;
 use nonempty::NonEmpty;
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::{
     fmt::{Debug, Display},
     sync::Arc,
@@ -132,10 +134,15 @@ pub trait MessagePoolApi {
     /// The result is a `Cow` in case the source can avoid cloning messages and just
     /// return a reference. They will be sent to the data store for storage, but a
     /// reference is enough for that.
+    ///
+    /// The skip parameter allows us to set a minimum nonce for accounts from which
+    /// we already sent messages to a total ordering service, so we can send more
+    /// messages without duplicating the ones we sent earlier.
     async fn select_signed<DB>(
         &self,
         state_manager: &StateManager<DB>,
         base: &Tipset,
+        skip: &HashMap<Address, u64>,
     ) -> anyhow::Result<Vec<Cow<SignedMessage>>>
     where
         DB: BlockStore + Sync + Send + 'static;
@@ -150,11 +157,12 @@ where
         &self,
         _: &StateManager<DB>,
         base: &Tipset,
+        skip: &HashMap<Address, u64>,
     ) -> anyhow::Result<Vec<Cow<SignedMessage>>>
     where
         DB: BlockStore + Sync + Send + 'static,
     {
-        self.select_messages_for_block(base)
+        self.select_messages_for_block(base, skip)
             .await
             .map_err(|e| e.into())
             .map(|v| v.into_iter().map(Cow::Owned).collect())
