@@ -3942,12 +3942,15 @@ dependencies = [
  "fvm_ipld_encoding",
  "fvm_shared",
  "log",
+ "mysten-network",
  "node",
  "nonempty",
  "prometheus 0.13.1",
  "serde",
  "thiserror",
  "tokio",
+ "tokio-stream",
+ "tonic",
  "types",
 ]
 

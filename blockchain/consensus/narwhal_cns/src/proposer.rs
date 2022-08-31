@@ -4,6 +4,7 @@ use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use async_std::channel::Receiver;
 use async_std::path::PathBuf;
+use async_std::stream::StreamExt;
 use async_std::task;
 use async_std::{channel, task::JoinHandle};
 use async_trait::async_trait;
@@ -25,6 +26,7 @@ use fvm_shared::address::Address;
 use narwhal_config::{Committee, Parameters};
 use narwhal_fastcrypto::{traits::KeyPair as _, KeyPair, PublicKey};
 use narwhal_node::{Node, NodeStorage};
+use narwhal_types::{TransactionProto, TransactionsClient};
 
 use crate::consensus::{NarwhalConsensus, NarwhalConsensusError};
 use crate::exec::{ConsensusTransactionIndex, NarwhalExecutionState, NarwhalOutput};
@@ -87,6 +89,9 @@ impl Proposer for NarwhalProposer {
         let registry = prometheus::Registry::default();
         let name = self.keypair.public().clone();
 
+        // Lazily connect to the worker which isn't running yet.
+        let transactions_client = make_transactions_client(&name, &self.committee)?;
+
         // Start the Primary and a Worker. They will ask the execution state where to resume from.
         let mut handles = Vec::new();
 
@@ -140,7 +145,9 @@ impl Proposer for NarwhalProposer {
         }));
 
         handles.push(task::spawn(async move {
-            if let Err(e) = handle_head_watch(state_manager, mpool, head_rx).await {
+            if let Err(e) =
+                handle_head_watch(state_manager, mpool, head_rx, transactions_client).await
+            {
                 error!("Error handling head watch: {}", e)
             }
         }));
@@ -311,6 +318,7 @@ async fn handle_head_watch<DB, MP>(
     state_manager: Arc<StateManager<DB>>,
     mpool: Arc<MP>,
     mut head_rx: tokio::sync::watch::Receiver<Option<Arc<Tipset>>>,
+    mut transactions_client: TransactionsClient<tonic::transport::channel::Channel>,
 ) -> anyhow::Result<()>
 where
     DB: BlockStore + Sync + Send + 'static,
@@ -318,6 +326,7 @@ where
 {
     // Keep track of the last nonce for each account for which we sent a message to Narwhal.
     let mut submitted_account_sequences = HashMap::new();
+
     loop {
         // Wait for a block to be appended to the local chain.
         // Narwhal will produce blocks regularly, so as long as we append non-empty
@@ -360,12 +369,47 @@ where
                 continue;
             }
 
-            for msg in msgs {
+            for msg in msgs.iter() {
                 submitted_account_sequences.insert(msg.message.from, msg.message.sequence);
             }
 
+            let msgs = msgs
+                .into_iter()
+                .map(|msg| msg.marshal_cbor())
+                .collect::<Result<Vec<_>, _>>()?;
+
             // Send the transactions to the worker.
-            todo!()
+            // Based on benchmark_client.rs
+            let stream = tokio_stream::iter(msgs.into_iter()).map(|msg| TransactionProto {
+                transaction: msg.into(),
+            });
+
+            // TODO: For now let this task fail if we can't send. But we need better error handling, maybe it's not running yet.
+            transactions_client
+                .submit_transaction_stream(stream)
+                .await?;
         }
     }
+}
+
+/// Open a gRPC client through which we can send transactions.
+fn make_transactions_client(
+    own_public_key: &PublicKey,
+    committee: &Committee,
+) -> anyhow::Result<TransactionsClient<tonic::transport::channel::Channel>> {
+    // Based on reconfigure.rs in the Narwhal repo.
+    let target = committee
+        .worker(own_public_key, /* id */ &0)
+        .map_err(|e| anyhow!("Our key or worker id is not in the committee: {}", e))?
+        .transactions;
+
+    let config = mysten_network::config::Config::new();
+
+    let channel = config
+        .connect_lazy(&target)
+        .map_err(|e| anyhow!("Could not connect to target {}: {}", target, e))?;
+
+    let client = TransactionsClient::new(channel);
+
+    Ok(client)
 }
