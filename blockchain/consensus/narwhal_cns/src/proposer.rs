@@ -37,7 +37,7 @@ use crate::exec::{ConsensusTransactionIndex, NarwhalExecutionState, NarwhalOutpu
 /// transactions that users sent to it, while other nodes will similarly batch their
 /// own transactions, keeping transaction duplication across batches to the minimum.
 /// Users can send their transactions to multiple nodes, for redundancy and censorship
-/// resisteance.
+/// resistance.
 ///
 /// The proposer also acts as the execution engine for the Narwhal library, receiving
 /// committed certificates and batches of transactions from the network. Each certificate
@@ -166,7 +166,7 @@ fn tokio_to_async_std(
 }
 
 /// Handle local chain extensions by projecting blocks on top of them from the Narwhal batches.
-/// Also ping the mempool querier that there might be some change that makes it worth running another check.
+/// Also ping the mempool reader process that there might be some change that makes it worth running another check.
 async fn handle_head_changes<DB>(
     state_manager: Arc<StateManager<DB>>,
     submitter: SyncGossipSubmitter,

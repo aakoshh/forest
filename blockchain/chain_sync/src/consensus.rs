@@ -98,7 +98,7 @@ pub trait Proposer {
     /// The method returns a vector of handles so that it can start unspecified
     /// number of background tasks, which can all be canceled by the main thread
     /// if the application needs to exit. The method is async so that it can
-    /// use async operations to initialise itself, during wich it might encounter
+    /// use async operations to initialize itself, during which it might encounter
     /// some errors.
     async fn spawn<DB, MP>(
         self,
