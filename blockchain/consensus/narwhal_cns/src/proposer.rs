@@ -196,7 +196,7 @@ where
             }
         };
 
-        // Query the next viable set of transactions, using previous account/nonce to resume from.
+        // Notify the mempool polling process that there's a new tip.
         head_tx.send_replace(Some(next_head.clone()));
 
         // Take the next certificate from the queue and turn it into a block, then submit.
@@ -247,6 +247,8 @@ where
             match SignedMessage::unmarshal_cbor(bytes.as_ref()) {
                 Ok(msg) => messages.push(msg),
                 Err(e) => {
+                    // Narwhal will let anything in, so a Byzantine validator can send us garbage.
+                    // There's no way for us to decide if the fault is with them, or our deseralizer.
                     warn!("Error unmarshaling message: {}", e);
                     continue;
                 }
@@ -353,7 +355,7 @@ where
             // and guess what the account balance might be as if we have already
             // executed the messages we sent to Narwhal. Instead we'll just skip
             // those messages so they aren't double sent.
-            // A side effect of this skipping is that if the user replacs their message
+            // A side effect of this skipping is that if the user replaces their message
             // in the mempool with a different one having the same nonce, we will just
             // skip if it's already been sent to Narwhal.
             // At some point we also have to make sure that if Narwhal didn't include

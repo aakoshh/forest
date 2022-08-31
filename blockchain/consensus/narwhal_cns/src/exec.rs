@@ -70,7 +70,6 @@ where
 {
     /// Load the tip of the chain and get the last certificate index from the `Ticket` in the header.
     async fn load_next_certificate_index(&self) -> Result<SequenceNumber, Self::Error> {
-        // Load the last certificate from the KV store.
         match self.chain_store.heaviest_tipset().await {
             None => Ok(0),
             Some(tipset) => {

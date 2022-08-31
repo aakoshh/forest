@@ -65,6 +65,12 @@ impl Consensus for NarwhalConsensus {
         DB: BlockStore + Sync + Send + 'static,
     {
         // There is nothing to validate because we are only supposed to see blocks we created ourselves.
+        // The problem is that we will have to use historical syncing from the Forest stack because
+        // Narwhal will garbage collect the older blocks. At that point we have the following options:
+        // (1) use some kind of checkpointing mechanism, signed by all validators, so we can trust the
+        // chain up to the checkpoint without validation; (2) collect a sample from the rest of the
+        // peers and hope they would not be agreeing on them if the blocks weren't correct, then just
+        // apply them, as long as our chain ends up with the block we sampled.
         Ok(())
     }
 }

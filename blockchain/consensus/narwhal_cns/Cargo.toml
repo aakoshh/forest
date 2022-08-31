@@ -45,7 +45,3 @@ narwhal_executor   = { git = "https://github.com/MystenLabs/narwhal.git", rev = 
 narwhal_fastcrypto = { git = "https://github.com/MystenLabs/fastcrypto", rev = "a9e58305dc463c40b9d357730203406214909f04", package = "fastcrypto" }
 narwhal_node       = { git = "https://github.com/MystenLabs/narwhal.git", rev = "030517045b183d7076174572d730ef76e4adea07", package = "node" }
 narwhal_types      = { git = "https://github.com/MystenLabs/narwhal.git", rev = "030517045b183d7076174572d730ef76e4adea07", package = "types" }
-
-
-# Use local version because Filecoin fixes BLST dependency one earlier versions.
-# narwhal_node = { path = "../../../../narwhal/node", package = "node" }
