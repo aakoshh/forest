@@ -232,13 +232,16 @@ where
     DB: BlockStore + Sync + Send + 'static,
 {
     let validator_key = output.consensus_output.certificate.origin();
+
     let miner_addr = validator_addresses
         .get(&validator_key)
-        .map(|a| a.clone())
-        .ok_or_else(|| NarwhalConsensusError::NoMinerAddress(validator_key))?;
+        .copied()
+        .ok_or(NarwhalConsensusError::NoMinerAddress(validator_key))?;
+
     let consensus_index = output.consensus_output.consensus_index;
 
     let mut messages = Vec::new();
+
     for batch in output.transaction_batches {
         for bytes in batch {
             match SignedMessage::unmarshal_cbor(bytes.as_ref()) {
