@@ -59,6 +59,11 @@ pub trait Consensus: Scale + Debug + Send + Sync + Unpin + 'static {
     /// 2) the signature becomes part of the block CID (just not the `to_signing_bytes`),
     ///    so everyone would have different keys in their tipsets
     fn requires_block_signature() -> bool;
+
+    /// Indicate whether the `epoch` has relation to time and `block_delay`.
+    ///
+    /// If not, then we cannot compare epoch to the wall clock time to estimate maximum chain growth.
+    fn time_based_epoch() -> bool;
 }
 
 /// Helper function to collect errors from async validations.

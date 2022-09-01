@@ -449,7 +449,7 @@ where
 
         // Validate tipset
         if let Err(why) = TipsetValidator(&tipset)
-            .validate(
+            .validate::<_, C>(
                 chain_store.clone(),
                 bad_block_cache.clone(),
                 genesis.clone(),
@@ -482,6 +482,14 @@ where
         Ok(Some((tipset, source)))
     }
 
+    /// Start receiving incoming P2P messages until we find at least `tipset_sample_size` ones
+    /// that contain a tipset indicating what fork the remote peer is on. Then find the heaviest
+    /// among the sample and return a result based on the distance between our heaviest epoch
+    /// and theirs.
+    ///
+    /// Note that there doesn't seem to be anything to suggest that the heaviest in the sample is honest.
+    /// If the peer is dishonest and sends us down the garden path, their blocks will hopefully end up
+    /// in the bad block cache, and next time we'll pick another peer.
     fn evaluate_network_head(&self) -> ChainMuxerFuture<NetworkHeadEvaluation, ChainMuxerError<C>> {
         let p2p_messages = self.net_handler.clone();
         let chain_store = self.state_manager.chain_store().clone();

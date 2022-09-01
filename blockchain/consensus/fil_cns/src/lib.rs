@@ -126,4 +126,8 @@ where
     fn requires_block_signature() -> bool {
         true
     }
+
+    fn time_based_epoch() -> bool {
+        true
+    }
 }
