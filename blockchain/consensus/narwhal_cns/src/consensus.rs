@@ -73,4 +73,8 @@ impl Consensus for NarwhalConsensus {
         // apply them, as long as our chain ends up with the block we sampled.
         Ok(())
     }
+
+    fn requires_block_signature() -> bool {
+        false
+    }
 }
