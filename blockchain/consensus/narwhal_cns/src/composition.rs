@@ -15,9 +15,9 @@ type MiningTask = JoinHandle<anyhow::Result<()>>;
 pub type FullConsensus = NarwhalConsensus;
 
 pub const FETCH_PARAMS: bool = false;
+pub const PUBLISH_MSG: bool = false;
 
 // TODO: Disable block gossiping.
-// TODO: Disable mempool gossiping.
 
 // Only give reward for gas. There can be as many blocks as validators in each round.
 pub fn reward_calc() -> Arc<dyn forest_interpreter::RewardCalc> {
