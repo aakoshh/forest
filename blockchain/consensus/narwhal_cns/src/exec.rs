@@ -115,7 +115,7 @@ pub struct ConsensusTransactionIndex {
 }
 
 impl ConsensusTransactionIndex {
-    fn next_consensus_index(&self) -> SequenceNumber {
+    pub fn next_consensus_index(&self) -> SequenceNumber {
         if self.transactions_included < self.transactions_total {
             self.consensus_index
         } else {

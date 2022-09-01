@@ -205,6 +205,14 @@ where
             Ok(output) => output,
         };
 
+        // Check that the next certificate can actually be appended to the next head.
+        let head_index = ConsensusTransactionIndex::try_from(next_head.as_ref())?;
+        if head_index.next_consensus_index() > next_output.consensus_output.consensus_index {
+            // It looks like maybe we got a block from a peer during historical catch up that already
+            // includes this output, and we should not turn it into a duplicate block.
+            continue;
+        }
+
         // TODO: We might have to create multiple blocks from the same batch to respect limits!
         // For that, we should bite off just enough messages to be within limits, then keep the
         // partially consumed output in a buffer until we manage to append the block.
