@@ -659,9 +659,12 @@ where
     }
 
     /// Select messages that can be included in a block built on a given base tipset.
+    ///
+    /// Optionally skip some messages we already sent for ordering.
     pub async fn select_messages_for_block(
         &self,
         base: &Tipset,
+        skip: &HashMap<Address, u64>,
     ) -> Result<Vec<SignedMessage>, Error> {
         // Take a snapshot of the pending messages.
         let pending: HashMap<Address, HashMap<u64, SignedMessage>> = {
@@ -672,7 +675,11 @@ where
                     if mset.msgs.is_empty() {
                         None
                     } else {
-                        Some((*actor, mset.msgs.clone()))
+                        let mut msgs = mset.msgs.clone();
+                        if let Some(sequence) = skip.get(actor) {
+                            msgs.retain(|k, _| k > sequence);
+                        }
+                        Some((*actor, msgs))
                     }
                 })
                 .collect()

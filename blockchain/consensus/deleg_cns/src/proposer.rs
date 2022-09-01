@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use core::time::Duration;
 use futures::StreamExt;
 use log::{error, info};
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use forest_blocks::{BlockHeader, GossipBlock, Tipset};
 use forest_chain::Scale;
@@ -62,7 +62,9 @@ impl DelegatedProposer {
             forest_chain::compute_base_fee(state_manager.blockstore(), base, smoke_height)?;
 
         let parent_weight = DelegatedConsensus::weight(state_manager.blockstore(), base)?;
-        let msgs = mpool.select_signed(state_manager, base).await?;
+        let msgs = mpool
+            .select_signed(state_manager, base, &HashMap::default())
+            .await?;
         let msgs = msgs.iter().map(|m| m.as_ref()).collect();
         let persisted = forest_chain::persist_block_messages(state_manager.blockstore(), msgs)?;
 

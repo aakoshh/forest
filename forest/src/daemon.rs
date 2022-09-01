@@ -32,15 +32,24 @@ use std::sync::Arc;
 use std::time;
 
 // Initialize Consensus
-#[cfg(not(any(feature = "forest_fil_cns", feature = "forest_deleg_cns")))]
+#[cfg(not(any(
+    feature = "forest_fil_cns",
+    feature = "forest_deleg_cns",
+    feature = "forest_narwhal_cns"
+)))]
 compile_error!("No consensus feature enabled; use e.g. `--feature forest_fil_cns` to pick one.");
 
 // Default consensus
-#[cfg(all(feature = "forest_fil_cns", not(any(feature = "forest_deleg_cns"))))]
+#[cfg(all(
+    feature = "forest_fil_cns",
+    not(any(feature = "forest_deleg_cns", feature = "forest_narwhal_cns"))
+))]
 use forest_fil_cns::composition as cns;
 // Custom consensus.
 #[cfg(feature = "forest_deleg_cns")]
 use forest_deleg_cns::composition as cns;
+#[cfg(feature = "forest_narwhal_cns")]
+use forest_narwhal_cns::composition as cns;
 
 /// Starts daemon process
 pub(super) async fn start(config: Config) {
