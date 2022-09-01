@@ -138,4 +138,8 @@ impl Consensus for DelegatedConsensus {
             .await
             .map_err(NonEmpty::new)
     }
+
+    fn requires_block_signature() -> bool {
+        true
+    }
 }

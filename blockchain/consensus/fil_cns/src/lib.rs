@@ -122,4 +122,8 @@ where
     {
         validation::validate_block::<_, _, V>(state_manager, self.beacon.clone(), block).await
     }
+
+    fn requires_block_signature() -> bool {
+        true
+    }
 }

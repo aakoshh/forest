@@ -47,6 +47,18 @@ pub trait Consensus: Scale + Debug + Send + Sync + Unpin + 'static {
     ) -> Result<(), NonEmpty<Self::Error>>
     where
         DB: BlockStore + Sync + Send + 'static;
+
+    /// Indicate whether this consensus requires blocks to be signed.
+    ///
+    /// One use case where we can't have signatures is when nodes derive blocks in a deterministic
+    /// fashion from an already ordered stream of transactions. Under this scenario signatures might
+    /// be gossiped around later, but they aren't part of the block.
+    ///
+    /// The reason different nodes can't add different signatures to their individual blocks is because
+    /// 1) the would not be able to sign in the name of the miner who should get the rewards
+    /// 2) the signature becomes part of the block CID (just not the `to_signing_bytes`),
+    ///    so everyone would have different keys in their tipsets
+    fn requires_block_signature() -> bool;
 }
 
 /// Helper function to collect errors from async validations.
