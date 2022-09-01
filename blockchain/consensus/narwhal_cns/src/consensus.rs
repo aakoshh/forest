@@ -74,7 +74,16 @@ impl Consensus for NarwhalConsensus {
         Ok(())
     }
 
+    /// We cannot sign because each validator has to derive the same blocks from the total ordering
+    /// provided by Narwhal and Bullshark.
     fn requires_block_signature() -> bool {
+        false
+    }
+
+    /// Narwhal doesn't indicate the passage of time. While we could estimate the maximum chain growth,
+    /// it can only be used if we know how many validators were present in each committee. And the actual
+    /// growth can be much less than that, so it's not possible to compare against the wall clock time.
+    fn time_based_epoch() -> bool {
         false
     }
 }
