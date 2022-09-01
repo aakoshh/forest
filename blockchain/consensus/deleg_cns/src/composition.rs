@@ -15,6 +15,7 @@ type MiningTask = JoinHandle<()>;
 pub type FullConsensus = DelegatedConsensus;
 
 pub const FETCH_PARAMS: bool = false;
+pub const PUBLISH_MSG: bool = true;
 
 // Reward 1FIL on top of the gas, which is what Eudico does.
 pub fn reward_calc() -> Arc<dyn forest_interpreter::RewardCalc> {

@@ -15,6 +15,7 @@ type MiningTask = JoinHandle<()>;
 pub type FullConsensus = FilecoinConsensus<DrandBeacon, FullVerifier>;
 
 pub const FETCH_PARAMS: bool = true;
+pub const PUBLISH_MSG: bool = true;
 
 pub fn reward_calc() -> Arc<dyn forest_interpreter::RewardCalc> {
     Arc::new(forest_interpreter::RewardActorMessageCalc)

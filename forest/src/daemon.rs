@@ -21,7 +21,13 @@ use forest_state_manager::StateManager;
 use forest_utils::write_to_file;
 use fvm_shared::version::NetworkVersion;
 
-use async_std::{channel::bounded, net::TcpListener, sync::RwLock, task, task::JoinHandle};
+use async_std::{
+    channel::{bounded, unbounded},
+    net::TcpListener,
+    sync::RwLock,
+    task,
+    task::JoinHandle,
+};
 use futures::{select, FutureExt};
 use log::{debug, error, info, trace, warn};
 use rpassword::read_password;
@@ -269,14 +275,31 @@ pub(super) async fn start(config: Config) {
     let network_rx = p2p_service.network_receiver();
     let network_send = p2p_service.network_sender();
 
+    // Blackholing network sender for components we don't want to be able to talk to the network,
+    // but we also don't want to thread through some config value to disable sending.
+    let (blackhole_tx, blackhole_rx) = unbounded();
+    let blackhole_task = task::spawn(async move {
+        loop {
+            if let Err(_) = blackhole_rx.recv().await {
+                break;
+            }
+        }
+    });
+
     let (tipset_sink, tipset_stream) = bounded(20);
 
     // Initialize mpool
     let provider = MpoolRpcProvider::new(publisher.clone(), Arc::clone(&state_manager));
+    // The consensus might have its own black-box way of ordering transactions without relying on pubsub.
+    let mpool_network_send = if cns::PUBLISH_MSG {
+        network_send.clone()
+    } else {
+        blackhole_tx.clone()
+    };
     let (mpool, head_changes_task, republish_task) = MessagePool::with_tasks(
         provider,
         network_name.clone(),
-        network_send.clone(),
+        mpool_network_send,
         MpoolConfig::load_config(&db).unwrap(),
         Arc::clone(state_manager.chain_config()),
     )
@@ -368,6 +391,7 @@ pub(super) async fn start(config: Config) {
     republish_task.cancel().await;
     sync_task.cancel().await;
     p2p_task.cancel().await;
+    blackhole_task.cancel().await;
     maybe_cancel(rpc_task).await;
     keystore_write.await;
 
