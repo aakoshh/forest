@@ -1,8 +1,11 @@
 // Copyright 2019-2022 ChainSafe Systems
 // SPDX-License-Identifier: Apache-2.0, MIT
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
 };
 
 use crate::consensus::NarwhalConsensusError;
@@ -11,6 +14,7 @@ use async_trait::async_trait;
 use forest_blocks::{Error as BlockchainError, Ticket, Tipset};
 use forest_chain::ChainStore;
 use forest_chain::Error as ChainStoreError;
+use forest_chain_sync::{SyncStage, WorkerState};
 use forest_crypto::VRFProof;
 use forest_encoding::tuple::*;
 use forest_ipld_blockstore::BlockStore;
@@ -27,18 +31,37 @@ pub struct NarwhalOutput {
 }
 
 pub struct NarwhalExecutionState<BS> {
+    sync_state: WorkerState,
     chain_store: Arc<ChainStore<BS>>,
     output_tx: Sender<NarwhalOutput>,
     locked: AtomicBool,
 }
 
 impl<BS> NarwhalExecutionState<BS> {
-    pub fn new(chain_store: Arc<ChainStore<BS>>, output_tx: Sender<NarwhalOutput>) -> Self {
+    pub fn new(
+        sync_state: WorkerState,
+        chain_store: Arc<ChainStore<BS>>,
+        output_tx: Sender<NarwhalOutput>,
+    ) -> Self {
         Self {
+            sync_state,
             chain_store,
             output_tx,
             locked: AtomicBool::new(false),
         }
+    }
+
+    async fn wait_for_sync(&self) {
+        loop {
+            if self.is_sync_complete().await {
+                return;
+            }
+            async_std::task::sleep(Duration::from_secs(1)).await;
+        }
+    }
+
+    async fn is_sync_complete(&self) -> bool {
+        self.sync_state.read().await.stage() == SyncStage::Complete
     }
 }
 
@@ -70,6 +93,10 @@ where
 {
     /// Load the tip of the chain and get the last certificate index from the `Ticket` in the header.
     async fn load_next_certificate_index(&self) -> Result<SequenceNumber, Self::Error> {
+        // Don't return where to replay from until we have received what we could from the chan sync,
+        // otherwise we might be asking for a replay of garbage collected data because we are behind.
+        self.wait_for_sync().await;
+
         match self.chain_store.heaviest_tipset().await {
             None => Ok(0),
             Some(tipset) => {

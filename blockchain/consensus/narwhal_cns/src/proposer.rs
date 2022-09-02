@@ -8,6 +8,7 @@ use async_std::stream::StreamExt;
 use async_std::task;
 use async_std::{channel, task::JoinHandle};
 use async_trait::async_trait;
+use forest_chain_sync::WorkerState;
 use log::{error, warn};
 use narwhal_types::SequenceNumber;
 use std::collections::HashMap;
@@ -69,6 +70,7 @@ impl Proposer for NarwhalProposer {
         state_manager: Arc<StateManager<DB>>,
         mpool: Arc<MP>,
         submitter: SyncGossipSubmitter,
+        sync_state: WorkerState,
     ) -> anyhow::Result<Vec<JoinHandle<()>>>
     where
         DB: BlockStore + Sync + Send + 'static,
@@ -77,7 +79,12 @@ impl Proposer for NarwhalProposer {
         let chain_store = state_manager.chain_store();
         let (output_tx, output_rx) = channel::bounded(self.committee.size());
         let (head_tx, head_rx) = tokio::sync::watch::channel(None);
-        let execution_state = Arc::new(NarwhalExecutionState::new(chain_store.clone(), output_tx));
+
+        let execution_state = Arc::new(NarwhalExecutionState::new(
+            sync_state,
+            chain_store.clone(),
+            output_tx,
+        ));
 
         // The following is based on the `NodeRestarter` in the narwhal repo.
 
