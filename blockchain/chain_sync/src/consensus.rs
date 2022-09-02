@@ -22,6 +22,8 @@ use forest_blocks::{Block, GossipBlock, Tipset};
 use forest_ipld_blockstore::BlockStore;
 use forest_state_manager::StateManager;
 
+use crate::WorkerState;
+
 /// The `Consensus` trait encapsulates consensus specific rules of validation
 /// and block creation. Behind the scenes they can farm out the total ordering
 /// of transactions to an arbitrary consensus engine, but in the end they
@@ -117,6 +119,12 @@ pub trait Proposer {
     /// if the application needs to exit. The method is async so that it can
     /// use async operations to initialize itself, during which it might encounter
     /// some errors.
+    ///
+    /// The method can use the passed `sync_state` to wait until initial bootstrapping
+    /// is finished, before proposing blocks on earlier tips, however it *must* return
+    /// the spawned task handles before it looks at this state, because the syncing
+    /// might not be running at the time this method is called; waiting on it could
+    /// cause the node to hang.
     async fn spawn<DB, MP>(
         self,
         // NOTE: We will need access to the `ChainStore` as well, or, ideally
@@ -128,6 +136,7 @@ pub trait Proposer {
         state_manager: Arc<StateManager<DB>>,
         mpool: Arc<MP>,
         submitter: SyncGossipSubmitter,
+        sync_state: WorkerState,
     ) -> anyhow::Result<Vec<JoinHandle<()>>>
     where
         DB: BlockStore + Sync + Send + 'static,

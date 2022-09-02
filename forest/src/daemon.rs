@@ -6,7 +6,7 @@ use crate::cli_error_and_die;
 use forest_auth::{create_token, generate_priv_key, ADMIN, JWT_IDENTIFIER};
 use forest_chain::ChainStore;
 use forest_chain_sync::consensus::SyncGossipSubmitter;
-use forest_chain_sync::ChainMuxer;
+use forest_chain_sync::{ChainMuxer, WorkerState};
 use forest_db::rocks::RocksDb;
 use forest_fil_types::verifier::FullVerifier;
 use forest_genesis::{get_network_name_from_genesis, import_chain, read_genesis_header};
@@ -280,7 +280,7 @@ pub(super) async fn start(config: Config) {
     let (blackhole_tx, blackhole_rx) = unbounded();
     let blackhole_task = task::spawn(async move {
         loop {
-            if let Err(_) = blackhole_rx.recv().await {
+            if blackhole_rx.recv().await.is_err() {
                 break;
             }
         }
@@ -314,10 +314,19 @@ pub(super) async fn start(config: Config) {
         tipset_sink.clone(),
     );
 
+    // Sync state indicator.
+    let sync_state = WorkerState::default();
+
     // Initialize Consensus. Mining may or may not happen, depending on type.
-    let (consensus, mining_tasks) = cns::consensus(&state_manager, &keystore, &mpool, submitter)
-        .await
-        .unwrap();
+    let (consensus, mining_tasks) = cns::consensus(
+        &state_manager,
+        &keystore,
+        &mpool,
+        submitter,
+        sync_state.clone(),
+    )
+    .await
+    .unwrap();
 
     // Initialize ChainMuxer
     let chain_muxer_tipset_sink = tipset_sink.clone();
@@ -330,6 +339,7 @@ pub(super) async fn start(config: Config) {
         Arc::new(genesis),
         chain_muxer_tipset_sink,
         tipset_stream,
+        sync_state.clone(),
         config.sync,
     )
     .expect("Instantiating the ChainMuxer must succeed");

@@ -40,7 +40,7 @@ use thiserror::Error;
 use std::sync::Arc;
 use std::time::SystemTime;
 
-pub(crate) type WorkerState = Arc<RwLock<SyncState>>;
+pub type WorkerState = Arc<RwLock<SyncState>>;
 
 type ChainMuxerFuture<T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send>>;
 
@@ -175,6 +175,7 @@ where
         genesis: Arc<Tipset>,
         tipset_sender: Sender<Arc<Tipset>>,
         tipset_receiver: Receiver<Arc<Tipset>>,
+        worker_state: WorkerState,
         cfg: SyncConfig,
     ) -> Result<Self, ChainMuxerError<C>> {
         let network = SyncNetworkContext::new(
@@ -185,7 +186,7 @@ where
 
         Ok(Self {
             state: ChainMuxerState::Idle,
-            worker_state: Default::default(),
+            worker_state,
             network,
             genesis,
             consensus,

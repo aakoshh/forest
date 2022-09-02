@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0, MIT
 use crate::DelegatedConsensus;
 use async_std::{sync::RwLock, task::JoinHandle};
-use forest_chain_sync::consensus::{MessagePoolApi, Proposer, SyncGossipSubmitter};
+use forest_chain_sync::{
+    consensus::{MessagePoolApi, Proposer, SyncGossipSubmitter},
+    WorkerState,
+};
 use forest_ipld_blockstore::BlockStore;
 use forest_key_management::KeyStore;
 use forest_state_manager::StateManager;
@@ -29,6 +32,7 @@ pub async fn consensus<DB, MP>(
     keystore: &Arc<RwLock<KeyStore>>,
     mpool: &Arc<MP>,
     submitter: SyncGossipSubmitter,
+    sync_state: WorkerState,
 ) -> anyhow::Result<(FullConsensus, Vec<MiningTask>)>
 where
     DB: BlockStore + Send + Sync + 'static,
@@ -39,7 +43,7 @@ where
         info!("Starting the delegated consensus proposer...");
         let sm = state_manager.clone();
         let mp = mpool.clone();
-        let mining_tasks = proposer.spawn(sm, mp, submitter).await?;
+        let mining_tasks = proposer.spawn(sm, mp, submitter, sync_state).await?;
         Ok((consensus, mining_tasks))
     } else {
         Ok((consensus, vec![]))
