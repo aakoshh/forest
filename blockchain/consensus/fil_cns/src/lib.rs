@@ -112,6 +112,10 @@ where
 {
     type Error = FilecoinConsensusError;
 
+    const REQUIRE_MINER_SIGNATURE: bool = true;
+    const ENFORCE_EPOCH_DELAY: bool = true;
+    const ENFORCE_BLOCK_GAS_LIMIT: bool = true;
+
     async fn validate_block<DB>(
         &self,
         state_manager: Arc<StateManager<DB>>,
@@ -121,13 +125,5 @@ where
         DB: BlockStore + Sync + Send + 'static,
     {
         validation::validate_block::<_, _, V>(state_manager, self.beacon.clone(), block).await
-    }
-
-    fn requires_block_signature() -> bool {
-        true
-    }
-
-    fn time_based_epoch() -> bool {
-        true
     }
 }

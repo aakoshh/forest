@@ -72,7 +72,7 @@ impl<'a> TipsetValidator<'a> {
         }
 
         // Tipset epoch must not be behind current max
-        if C::time_based_epoch() {
+        if C::ENFORCE_EPOCH_DELAY {
             self.validate_epoch(genesis_tipset, block_delay)?;
         }
 

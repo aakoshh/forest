@@ -1445,7 +1445,7 @@ fn check_block_messages<DB: BlockStore + Send + Sync + 'static, C: Consensus>(
         valid_for_block_inclusion(msg, min_gas.total(), network_version)
             .map_err(|e| anyhow::anyhow!("{}", e))?;
         sum_gas_limit += msg.gas_limit;
-        if sum_gas_limit > BLOCK_GAS_LIMIT {
+        if sum_gas_limit > BLOCK_GAS_LIMIT && C::ENFORCE_BLOCK_GAS_LIMIT {
             anyhow::bail!("block gas limit exceeded");
         }
 
@@ -1538,7 +1538,7 @@ fn check_block_messages<DB: BlockStore + Send + Sync + 'static, C: Consensus>(
 fn block_sanity_checks<C: Consensus>(
     header: &BlockHeader,
 ) -> Result<(), TipsetRangeSyncerError<C>> {
-    if header.signature().is_none() && C::requires_block_signature() {
+    if header.signature().is_none() && C::REQUIRE_MINER_SIGNATURE {
         return Err(TipsetRangeSyncerError::BlockWithoutSignature);
     }
     // The BLS aggregate is based on the signed messages, so there can always be something.

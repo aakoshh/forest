@@ -60,12 +60,15 @@ pub trait Consensus: Scale + Debug + Send + Sync + Unpin + 'static {
     /// 1) the would not be able to sign in the name of the miner who should get the rewards
     /// 2) the signature becomes part of the block CID (just not the `to_signing_bytes`),
     ///    so everyone would have different keys in their tipsets
-    fn requires_block_signature() -> bool;
+    const REQUIRE_MINER_SIGNATURE: bool;
 
     /// Indicate whether the `epoch` has relation to time and `block_delay`.
     ///
     /// If not, then we cannot compare epoch to the wall clock time to estimate maximum chain growth.
-    fn time_based_epoch() -> bool;
+    const ENFORCE_EPOCH_DELAY: bool;
+
+    /// Should the block be rejected if the global `BLOCK_GAS_LIMIT` is violated.
+    const ENFORCE_BLOCK_GAS_LIMIT: bool;
 }
 
 /// Helper function to collect errors from async validations.

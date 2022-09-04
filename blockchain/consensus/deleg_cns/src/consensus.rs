@@ -126,6 +126,10 @@ impl Scale for DelegatedConsensus {
 impl Consensus for DelegatedConsensus {
     type Error = DelegatedConsensusError;
 
+    const REQUIRE_MINER_SIGNATURE: bool = true;
+    const ENFORCE_EPOCH_DELAY: bool = true;
+    const ENFORCE_BLOCK_GAS_LIMIT: bool = true;
+
     async fn validate_block<DB>(
         &self,
         state_manager: Arc<StateManager<DB>>,
@@ -137,13 +141,5 @@ impl Consensus for DelegatedConsensus {
         crate::validation::validate_block(&self.chosen_one, state_manager, block)
             .await
             .map_err(NonEmpty::new)
-    }
-
-    fn requires_block_signature() -> bool {
-        true
-    }
-
-    fn time_based_epoch() -> bool {
-        true
     }
 }
