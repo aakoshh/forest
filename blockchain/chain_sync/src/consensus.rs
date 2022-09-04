@@ -22,6 +22,8 @@ use forest_blocks::{Block, GossipBlock, Tipset};
 use forest_ipld_blockstore::BlockStore;
 use forest_state_manager::StateManager;
 
+use crate::WorkerState;
+
 /// The `Consensus` trait encapsulates consensus specific rules of validation
 /// and block creation. Behind the scenes they can farm out the total ordering
 /// of transactions to an arbitrary consensus engine, but in the end they
@@ -47,6 +49,26 @@ pub trait Consensus: Scale + Debug + Send + Sync + Unpin + 'static {
     ) -> Result<(), NonEmpty<Self::Error>>
     where
         DB: BlockStore + Sync + Send + 'static;
+
+    /// Indicate whether this consensus requires blocks to be signed.
+    ///
+    /// One use case where we can't have signatures is when nodes derive blocks in a deterministic
+    /// fashion from an already ordered stream of transactions. Under this scenario signatures might
+    /// be gossiped around later, but they aren't part of the block.
+    ///
+    /// The reason different nodes can't add different signatures to their individual blocks is because
+    /// 1) the would not be able to sign in the name of the miner who should get the rewards
+    /// 2) the signature becomes part of the block CID (just not the `to_signing_bytes`),
+    ///    so everyone would have different keys in their tipsets
+    const REQUIRE_MINER_SIGNATURE: bool;
+
+    /// Indicate whether the `epoch` has relation to time and `block_delay`.
+    ///
+    /// If not, then we cannot compare epoch to the wall clock time to estimate maximum chain growth.
+    const ENFORCE_EPOCH_DELAY: bool;
+
+    /// Should the block be rejected if the global `BLOCK_GAS_LIMIT` is violated.
+    const ENFORCE_BLOCK_GAS_LIMIT: bool;
 }
 
 /// Helper function to collect errors from async validations.
@@ -100,6 +122,12 @@ pub trait Proposer {
     /// if the application needs to exit. The method is async so that it can
     /// use async operations to initialize itself, during which it might encounter
     /// some errors.
+    ///
+    /// The method can use the passed `sync_state` to wait until initial bootstrapping
+    /// is finished, before proposing blocks on earlier tips, however it *must* return
+    /// the spawned task handles before it looks at this state, because the syncing
+    /// might not be running at the time this method is called; waiting on it could
+    /// cause the node to hang.
     async fn spawn<DB, MP>(
         self,
         // NOTE: We will need access to the `ChainStore` as well, or, ideally
@@ -111,6 +139,7 @@ pub trait Proposer {
         state_manager: Arc<StateManager<DB>>,
         mpool: Arc<MP>,
         submitter: SyncGossipSubmitter,
+        sync_state: WorkerState,
     ) -> anyhow::Result<Vec<JoinHandle<()>>>
     where
         DB: BlockStore + Sync + Send + 'static,
@@ -191,21 +220,41 @@ impl SyncGossipSubmitter {
         }
     }
 
-    /// Enqueue the block to be appended to the local chain and also gossip it to peers.
-    pub async fn submit_block(&self, block: GossipBlock) -> anyhow::Result<()> {
-        let data = block.marshal_cbor()?;
-        let msg = NetworkMessage::PubsubMessage {
-            topic: Topic::new(format!("{}/{}", PUBSUB_BLOCK_STR, self.network_name)),
-            message: data,
-        };
-        self.submit_block_locally(block).await?;
-        self.network_tx.send(msg).await?;
+    /// Enqueue blocks to be appended to the local chain and also gossip it to peers.
+    ///
+    /// All the blocks must be in the same epoch, so they can form a tipset.
+    pub async fn submit_blocks(&self, blocks: Vec<GossipBlock>) -> anyhow::Result<()> {
+        let datas = blocks
+            .iter()
+            .map(|b| b.marshal_cbor())
+            .collect::<Result<Vec<_>, _>>()?;
+
+        self.submit_blocks_locally(blocks).await?;
+
+        for data in datas {
+            let msg = NetworkMessage::PubsubMessage {
+                topic: Topic::new(format!("{}/{}", PUBSUB_BLOCK_STR, self.network_name)),
+                message: data,
+            };
+            self.network_tx.send(msg).await?;
+        }
+
         Ok(())
     }
 
-    /// Enqueue the block to be appended to the local chain, without gossiping to peers.
-    pub async fn submit_block_locally(&self, block: GossipBlock) -> anyhow::Result<()> {
-        let ts = Arc::new(Tipset::new(vec![block.header])?);
+    /// Enqueue the blocks to be appended to the local chain, without gossiping to peers.
+    ///
+    /// They all must be part of the same epoch, to form a single tipset.
+    pub async fn submit_blocks_locally(&self, blocks: Vec<GossipBlock>) -> anyhow::Result<()> {
+        let hs = blocks.into_iter().map(|b| b.header).collect();
+        let ts = Tipset::new(hs)?;
+        self.submit_tipset_locally(ts).await?;
+        Ok(())
+    }
+
+    /// Enqueue a tipset to be appended to the local chain.
+    pub async fn submit_tipset_locally(&self, tipset: Tipset) -> anyhow::Result<()> {
+        let ts = Arc::new(tipset);
         self.tipset_tx.send(ts).await?;
         Ok(())
     }

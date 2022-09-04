@@ -112,6 +112,10 @@ where
 {
     type Error = FilecoinConsensusError;
 
+    const REQUIRE_MINER_SIGNATURE: bool = true;
+    const ENFORCE_EPOCH_DELAY: bool = true;
+    const ENFORCE_BLOCK_GAS_LIMIT: bool = true;
+
     async fn validate_block<DB>(
         &self,
         state_manager: Arc<StateManager<DB>>,

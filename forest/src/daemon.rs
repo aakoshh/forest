@@ -6,7 +6,7 @@ use crate::cli_error_and_die;
 use forest_auth::{create_token, generate_priv_key, ADMIN, JWT_IDENTIFIER};
 use forest_chain::ChainStore;
 use forest_chain_sync::consensus::SyncGossipSubmitter;
-use forest_chain_sync::ChainMuxer;
+use forest_chain_sync::{ChainMuxer, WorkerState};
 use forest_db::rocks::RocksDb;
 use forest_fil_types::verifier::FullVerifier;
 use forest_genesis::{get_network_name_from_genesis, import_chain, read_genesis_header};
@@ -21,7 +21,13 @@ use forest_state_manager::StateManager;
 use forest_utils::write_to_file;
 use fvm_shared::version::NetworkVersion;
 
-use async_std::{channel::bounded, net::TcpListener, sync::RwLock, task, task::JoinHandle};
+use async_std::{
+    channel::{bounded, unbounded},
+    net::TcpListener,
+    sync::RwLock,
+    task,
+    task::JoinHandle,
+};
 use futures::{select, FutureExt};
 use log::{debug, error, info, trace, warn};
 use rpassword::read_password;
@@ -269,14 +275,31 @@ pub(super) async fn start(config: Config) {
     let network_rx = p2p_service.network_receiver();
     let network_send = p2p_service.network_sender();
 
+    // Blackholing network sender for components we don't want to be able to talk to the network,
+    // but we also don't want to thread through some config value to disable sending.
+    let (blackhole_tx, blackhole_rx) = unbounded();
+    let blackhole_task = task::spawn(async move {
+        loop {
+            if blackhole_rx.recv().await.is_err() {
+                break;
+            }
+        }
+    });
+
     let (tipset_sink, tipset_stream) = bounded(20);
 
     // Initialize mpool
     let provider = MpoolRpcProvider::new(publisher.clone(), Arc::clone(&state_manager));
+    // The consensus might have its own black-box way of ordering transactions without relying on pubsub.
+    let mpool_network_send = if cns::PUBLISH_MSG {
+        network_send.clone()
+    } else {
+        blackhole_tx.clone()
+    };
     let (mpool, head_changes_task, republish_task) = MessagePool::with_tasks(
         provider,
         network_name.clone(),
-        network_send.clone(),
+        mpool_network_send,
         MpoolConfig::load_config(&db).unwrap(),
         Arc::clone(state_manager.chain_config()),
     )
@@ -291,10 +314,19 @@ pub(super) async fn start(config: Config) {
         tipset_sink.clone(),
     );
 
+    // Sync state indicator.
+    let sync_state = WorkerState::default();
+
     // Initialize Consensus. Mining may or may not happen, depending on type.
-    let (consensus, mining_tasks) = cns::consensus(&state_manager, &keystore, &mpool, submitter)
-        .await
-        .unwrap();
+    let (consensus, mining_tasks) = cns::consensus(
+        &state_manager,
+        &keystore,
+        &mpool,
+        submitter,
+        sync_state.clone(),
+    )
+    .await
+    .unwrap();
 
     // Initialize ChainMuxer
     let chain_muxer_tipset_sink = tipset_sink.clone();
@@ -307,6 +339,7 @@ pub(super) async fn start(config: Config) {
         Arc::new(genesis),
         chain_muxer_tipset_sink,
         tipset_stream,
+        sync_state.clone(),
         config.sync,
     )
     .expect("Instantiating the ChainMuxer must succeed");
@@ -368,6 +401,7 @@ pub(super) async fn start(config: Config) {
     republish_task.cancel().await;
     sync_task.cancel().await;
     p2p_task.cancel().await;
+    blackhole_task.cancel().await;
     maybe_cancel(rpc_task).await;
     keystore_write.await;
 

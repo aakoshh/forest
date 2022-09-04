@@ -1,7 +1,10 @@
 // Copyright 2019-2022 ChainSafe Systems
 // SPDX-License-Identifier: Apache-2.0, MIT
 use async_std::{sync::RwLock, task::JoinHandle};
-use forest_chain_sync::consensus::{MessagePoolApi, SyncGossipSubmitter};
+use forest_chain_sync::{
+    consensus::{MessagePoolApi, SyncGossipSubmitter},
+    WorkerState,
+};
 use forest_ipld_blockstore::BlockStore;
 use forest_key_management::KeyStore;
 use forest_state_manager::StateManager;
@@ -15,9 +18,9 @@ type MiningTask = JoinHandle<anyhow::Result<()>>;
 pub type FullConsensus = NarwhalConsensus;
 
 pub const FETCH_PARAMS: bool = false;
+pub const PUBLISH_MSG: bool = false;
 
 // TODO: Disable block gossiping.
-// TODO: Disable mempool gossiping.
 
 // Only give reward for gas. There can be as many blocks as validators in each round.
 pub fn reward_calc() -> Arc<dyn forest_interpreter::RewardCalc> {
@@ -31,6 +34,7 @@ pub async fn consensus<DB, MP>(
     _keystore: &Arc<RwLock<KeyStore>>,
     _mpool: &Arc<MP>,
     _submitter: SyncGossipSubmitter,
+    _sync_state: WorkerState,
 ) -> anyhow::Result<(FullConsensus, Vec<MiningTask>)>
 where
     DB: BlockStore + Send + Sync + 'static,

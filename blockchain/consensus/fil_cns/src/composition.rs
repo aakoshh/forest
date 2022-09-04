@@ -3,7 +3,10 @@
 use crate::FilecoinConsensus;
 use async_std::{sync::RwLock, task::JoinHandle};
 use forest_beacon::DrandBeacon;
-use forest_chain_sync::consensus::{MessagePoolApi, SyncGossipSubmitter};
+use forest_chain_sync::{
+    consensus::{MessagePoolApi, SyncGossipSubmitter},
+    WorkerState,
+};
 use forest_fil_types::verifier::FullVerifier;
 use forest_ipld_blockstore::BlockStore;
 use forest_key_management::KeyStore;
@@ -15,6 +18,7 @@ type MiningTask = JoinHandle<()>;
 pub type FullConsensus = FilecoinConsensus<DrandBeacon, FullVerifier>;
 
 pub const FETCH_PARAMS: bool = true;
+pub const PUBLISH_MSG: bool = true;
 
 pub fn reward_calc() -> Arc<dyn forest_interpreter::RewardCalc> {
     Arc::new(forest_interpreter::RewardActorMessageCalc)
@@ -25,6 +29,7 @@ pub async fn consensus<DB, MP>(
     _keystore: &Arc<RwLock<KeyStore>>,
     _mpool: &Arc<MP>,
     _submitter: SyncGossipSubmitter,
+    _sync_state: WorkerState,
 ) -> anyhow::Result<(FullConsensus, Vec<MiningTask>)>
 where
     DB: BlockStore + Send + Sync + 'static,

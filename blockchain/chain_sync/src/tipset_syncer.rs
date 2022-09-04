@@ -1334,7 +1334,10 @@ async fn validate_block<DB: BlockStore + Sync + Send + 'static, C: Consensus>(
     // Block signature check
     let v_block = block.clone();
     validations.push(task::spawn_blocking(move || {
-        v_block.header().check_block_signature(&work_addr)?;
+        // Sanity checking already ensured that the signature is either present, or it's acceptable not to be.
+        if v_block.header().signature().is_some() {
+            v_block.header().check_block_signature(&work_addr)?;
+        }
         Ok(())
     }));
 
@@ -1442,7 +1445,7 @@ fn check_block_messages<DB: BlockStore + Send + Sync + 'static, C: Consensus>(
         valid_for_block_inclusion(msg, min_gas.total(), network_version)
             .map_err(|e| anyhow::anyhow!("{}", e))?;
         sum_gas_limit += msg.gas_limit;
-        if sum_gas_limit > BLOCK_GAS_LIMIT {
+        if sum_gas_limit > BLOCK_GAS_LIMIT && C::ENFORCE_BLOCK_GAS_LIMIT {
             anyhow::bail!("block gas limit exceeded");
         }
 
@@ -1535,9 +1538,11 @@ fn check_block_messages<DB: BlockStore + Send + Sync + 'static, C: Consensus>(
 fn block_sanity_checks<C: Consensus>(
     header: &BlockHeader,
 ) -> Result<(), TipsetRangeSyncerError<C>> {
-    if header.signature().is_none() {
+    if header.signature().is_none() && C::REQUIRE_MINER_SIGNATURE {
         return Err(TipsetRangeSyncerError::BlockWithoutSignature);
     }
+    // The BLS aggregate is based on the signed messages, so there can always be something.
+    // If there are no BLS messages it's supposed to contain some empty bytes.
     if header.bls_aggregate().is_none() {
         return Err(TipsetRangeSyncerError::BlockWithoutBlsAggregate);
     }

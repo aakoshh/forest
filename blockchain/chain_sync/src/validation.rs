@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0, MIT
 
 use crate::bad_block_cache::BadBlockCache;
+use crate::Consensus;
 
 use cid::{multihash::Code::Blake2b256, Cid};
 use forest_blocks::{Block, FullTipset, Tipset, TxMeta};
@@ -54,20 +55,26 @@ impl From<EncodingError> for TipsetValidationError {
 pub struct TipsetValidator<'a>(pub &'a FullTipset);
 
 impl<'a> TipsetValidator<'a> {
-    pub async fn validate<DB: BlockStore + Send + Sync + 'static>(
+    pub async fn validate<DB, C>(
         &self,
         chainstore: Arc<ChainStore<DB>>,
         bad_block_cache: Arc<BadBlockCache>,
         genesis_tipset: Arc<Tipset>,
         block_delay: u64,
-    ) -> Result<(), TipsetValidationError> {
+    ) -> Result<(), TipsetValidationError>
+    where
+        DB: BlockStore + Send + Sync + 'static,
+        C: Consensus,
+    {
         // No empty blocks
         if self.0.blocks().is_empty() {
             return Err(TipsetValidationError::NoBlocks);
         }
 
         // Tipset epoch must not be behind current max
-        self.validate_epoch(genesis_tipset, block_delay)?;
+        if C::ENFORCE_EPOCH_DELAY {
+            self.validate_epoch(genesis_tipset, block_delay)?;
+        }
 
         // Validate each block in the tipset by:
         // 1. Calculating the message root using all of the messages to ensure it matches the mst root in the block header
@@ -82,7 +89,7 @@ impl<'a> TipsetValidator<'a> {
         Ok(())
     }
 
-    pub fn validate_epoch(
+    fn validate_epoch(
         &self,
         genesis_tipset: Arc<Tipset>,
         block_delay: u64,
@@ -100,7 +107,7 @@ impl<'a> TipsetValidator<'a> {
         }
     }
 
-    pub fn validate_msg_root<DB: BlockStore>(
+    fn validate_msg_root<DB: BlockStore>(
         &self,
         blockstore: &DB,
         block: &Block,

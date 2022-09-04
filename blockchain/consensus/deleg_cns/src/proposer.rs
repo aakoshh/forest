@@ -13,7 +13,10 @@ use std::{collections::HashMap, sync::Arc};
 
 use forest_blocks::{BlockHeader, GossipBlock, Tipset};
 use forest_chain::Scale;
-use forest_chain_sync::consensus::{MessagePoolApi, Proposer, SyncGossipSubmitter};
+use forest_chain_sync::{
+    consensus::{MessagePoolApi, Proposer, SyncGossipSubmitter},
+    WorkerState,
+};
 use forest_ipld_blockstore::BlockStore;
 use forest_key_management::Key;
 use forest_networks::Height;
@@ -104,6 +107,7 @@ impl Proposer for DelegatedProposer {
         state_manager: Arc<StateManager<DB>>,
         mpool: Arc<MP>,
         submitter: SyncGossipSubmitter,
+        _sync_state: WorkerState,
     ) -> anyhow::Result<Vec<JoinHandle<()>>>
     where
         DB: BlockStore + Sync + Send + 'static,
@@ -146,7 +150,7 @@ impl DelegatedProposer {
                     Ok(block) => {
                         let cid = *block.header.cid();
                         let msg_cnt = block.secpk_messages.len() + block.bls_messages.len();
-                        match submitter.submit_block(block).await {
+                        match submitter.submit_blocks(vec![block]).await {
                             Ok(()) => info!("Proposed block {} with {} messages", cid, msg_cnt),
                             Err(e) => error!("Failed to submit block: {}", e),
                         }

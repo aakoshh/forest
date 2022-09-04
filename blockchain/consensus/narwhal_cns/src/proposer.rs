@@ -8,6 +8,7 @@ use async_std::stream::StreamExt;
 use async_std::task;
 use async_std::{channel, task::JoinHandle};
 use async_trait::async_trait;
+use forest_chain_sync::WorkerState;
 use log::{error, warn};
 use narwhal_types::SequenceNumber;
 use std::collections::HashMap;
@@ -69,6 +70,7 @@ impl Proposer for NarwhalProposer {
         state_manager: Arc<StateManager<DB>>,
         mpool: Arc<MP>,
         submitter: SyncGossipSubmitter,
+        sync_state: WorkerState,
     ) -> anyhow::Result<Vec<JoinHandle<()>>>
     where
         DB: BlockStore + Sync + Send + 'static,
@@ -77,7 +79,12 @@ impl Proposer for NarwhalProposer {
         let chain_store = state_manager.chain_store();
         let (output_tx, output_rx) = channel::bounded(self.committee.size());
         let (head_tx, head_rx) = tokio::sync::watch::channel(None);
-        let execution_state = Arc::new(NarwhalExecutionState::new(chain_store.clone(), output_tx));
+
+        let execution_state = Arc::new(NarwhalExecutionState::new(
+            sync_state,
+            chain_store.clone(),
+            output_tx,
+        ));
 
         // The following is based on the `NodeRestarter` in the narwhal repo.
 
@@ -179,6 +186,9 @@ async fn handle_head_changes<DB>(
 where
     DB: BlockStore + Sync + Send + 'static,
 {
+    // We need to buffer the first output from the next round, so we can put multiple into the same tipset.
+    let mut output_buffer: Vec<NarwhalOutput> = Vec::new();
+
     loop {
         // Wait for the next chain extension.
         let next_head = if let Some(tipset) = current_head.take() {
@@ -199,26 +209,79 @@ where
         // Notify the mempool polling process that there's a new tip.
         head_tx.send_replace(Some(next_head.clone()));
 
-        // Take the next certificate from the queue and turn it into a block, then submit.
-        let next_output = match output_rx.recv().await {
-            Err(_) => return Err(anyhow!("Cannot receive Narwhal output!")),
-            Ok(output) => output,
-        };
+        // Check that the next certificate can actually be appended to the next head.
+        let head_index = ConsensusTransactionIndex::try_from(next_head.as_ref())?;
 
-        // TODO: We might have to create multiple blocks from the same batch to respect limits!
-        // For that, we should bite off just enough messages to be within limits, then keep the
-        // partially consumed output in a buffer until we manage to append the block.
-        let block = create_block_from_output(
+        // Take all certificates for the next round, so they can be turned into a single tipset.
+        let mut next_outputs = Vec::new();
+        loop {
+            // There will always be a next output within some max delay.
+            let next_output = recv_output(&output_rx).await?;
+
+            if head_index.next_consensus_index() > next_output.consensus_output.consensus_index {
+                // It looks like maybe we got a block from a peer during historical catch up that already
+                // includes this output, and we should not turn it into a duplicate block.
+                continue;
+            }
+
+            // Try to extend the current buffer, or start a new one when we can't.
+            if output_buffer
+                .last()
+                .map(|o| o.epoch_round() == next_output.epoch_round())
+                .unwrap_or_default()
+            {
+                output_buffer.push(next_output);
+            } else {
+                std::mem::swap(&mut output_buffer, &mut next_outputs);
+                output_buffer.push(next_output);
+                break;
+            }
+        }
+
+        let blocks = create_blocks_from_outputs(
             &state_manager,
             &validator_addresses,
             &next_head,
-            next_output,
+            next_outputs,
         )
         .await?;
 
         // Enqueue appending to the local blockchain.
-        submitter.submit_block_locally(block).await?;
+        submitter.submit_blocks_locally(blocks).await?;
     }
+}
+
+async fn recv_output(output_rx: &Receiver<NarwhalOutput>) -> anyhow::Result<NarwhalOutput> {
+    match output_rx.recv().await {
+        Err(e) => Err(anyhow!("Cannot receive Narwhal output: {}", e)),
+        Ok(output) => Ok(output),
+    }
+}
+
+/// Create blocks from outputs in the same epoch+round, using the same base as their parent,
+/// to form a single tipset.
+async fn create_blocks_from_outputs<DB>(
+    state_manager: &Arc<StateManager<DB>>,
+    validator_addresses: &HashMap<PublicKey, Address>,
+    base: &Arc<Tipset>,
+    outputs: Vec<NarwhalOutput>,
+) -> anyhow::Result<Vec<GossipBlock>>
+where
+    DB: BlockStore + Sync + Send + 'static,
+{
+    let mut blocks = Vec::new();
+
+    for output in outputs {
+        // TODO: We might have to create multiple blocks from the same batch to respect limits!
+        // For that, we should bite off just enough messages to be within limits, then keep the
+        // partially consumed output in a buffer until we manage to append the block.
+        // Unfortunately that would not work because a Tipset requires all miners in it to be unique.
+        blocks.push(
+            create_block_from_output(state_manager, validator_addresses, base, output).await?,
+        );
+    }
+
+    Ok(blocks)
 }
 
 /// Create a block from a Narwhal certificate and the included batches of transactions.
