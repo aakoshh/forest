@@ -217,21 +217,41 @@ impl SyncGossipSubmitter {
         }
     }
 
-    /// Enqueue the block to be appended to the local chain and also gossip it to peers.
-    pub async fn submit_block(&self, block: GossipBlock) -> anyhow::Result<()> {
-        let data = block.marshal_cbor()?;
-        let msg = NetworkMessage::PubsubMessage {
-            topic: Topic::new(format!("{}/{}", PUBSUB_BLOCK_STR, self.network_name)),
-            message: data,
-        };
-        self.submit_block_locally(block).await?;
-        self.network_tx.send(msg).await?;
+    /// Enqueue blocks to be appended to the local chain and also gossip it to peers.
+    ///
+    /// All the blocks must be in the same epoch, so they can form a tipset.
+    pub async fn submit_blocks(&self, blocks: Vec<GossipBlock>) -> anyhow::Result<()> {
+        let datas = blocks
+            .iter()
+            .map(|b| b.marshal_cbor())
+            .collect::<Result<Vec<_>, _>>()?;
+
+        self.submit_blocks_locally(blocks).await?;
+
+        for data in datas {
+            let msg = NetworkMessage::PubsubMessage {
+                topic: Topic::new(format!("{}/{}", PUBSUB_BLOCK_STR, self.network_name)),
+                message: data,
+            };
+            self.network_tx.send(msg).await?;
+        }
+
         Ok(())
     }
 
-    /// Enqueue the block to be appended to the local chain, without gossiping to peers.
-    pub async fn submit_block_locally(&self, block: GossipBlock) -> anyhow::Result<()> {
-        let ts = Arc::new(Tipset::new(vec![block.header])?);
+    /// Enqueue the blocks to be appended to the local chain, without gossiping to peers.
+    ///
+    /// They all must be part of the same epoch, to form a single tipset.
+    pub async fn submit_blocks_locally(&self, blocks: Vec<GossipBlock>) -> anyhow::Result<()> {
+        let hs = blocks.into_iter().map(|b| b.header).collect();
+        let ts = Tipset::new(hs)?;
+        self.submit_tipset_locally(ts).await?;
+        Ok(())
+    }
+
+    /// Enqueue a tipset to be appended to the local chain.
+    pub async fn submit_tipset_locally(&self, tipset: Tipset) -> anyhow::Result<()> {
+        let ts = Arc::new(tipset);
         self.tipset_tx.send(ts).await?;
         Ok(())
     }
