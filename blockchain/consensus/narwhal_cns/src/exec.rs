@@ -25,9 +25,21 @@ use narwhal_executor::{
 };
 use narwhal_types::SequenceNumber;
 
+pub type NarwhalEpoch = u64;
+pub type NarwhalRound = u64;
+
 pub struct NarwhalOutput {
     pub consensus_output: ConsensusOutput,
     pub transaction_batches: Vec<Vec<SerializedTransaction>>,
+}
+
+impl NarwhalOutput {
+    /// Round resets with each epoch, so the pair of them shows when Narwhal has moved on.
+    pub fn epoch_round(&self) -> (NarwhalEpoch, NarwhalRound) {
+        let e = self.consensus_output.certificate.header.epoch;
+        let r = self.consensus_output.certificate.header.round;
+        (e, r)
+    }
 }
 
 pub struct NarwhalExecutionState<BS> {
@@ -162,7 +174,7 @@ impl TryFrom<&Tipset> for ConsensusTransactionIndex {
     type Error = NarwhalConsensusError;
 
     fn try_from(tipset: &Tipset) -> Result<Self, Self::Error> {
-        match tipset.min_ticket() {
+        match tipset.blocks().last().and_then(|b| b.ticket().as_ref()) {
             None => Err(NarwhalConsensusError::ChainStore(
                 ChainStoreError::Blockchain(BlockchainError::InvalidTipset(
                     "Missing ticket.".into(),
